@@ -1,0 +1,11 @@
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/ChurchProjection.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/package.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/package_source.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/edit_cache.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/rebuild_cache.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/list_install_components.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/install.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/install/local.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/install/strip.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/ChurchProjection_autogen_timestamp_deps.dir
+/Users/lennoxkk/Documents/Bible reading/church-projection/build/CMakeFiles/ChurchProjection_autogen.dir

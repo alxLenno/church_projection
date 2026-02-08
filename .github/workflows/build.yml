@@ -1,0 +1,56 @@
+name: Build and Package
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.5.3' # Long Term Support version
+        host: ${{ matrix.os == 'macos-latest' && 'mac' || (matrix.os == 'windows-latest' && 'windows' || 'linux') }}
+        target: 'desktop'
+        arch: ${{ matrix.os == 'windows-latest' && 'win64_msvc2019_64' || '' }}
+
+    # Linux specific dependencies
+    - name: Install Linux Dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils
+
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build --config Release
+
+    - name: Package
+      working-directory: build
+      run: cpack -C Release -V
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ChurchProjection-Installer-${{ matrix.os }}
+        path: |
+          build/ChurchProjection-*-win64.exe
+          build/ChurchProjection-*-win64.zip
+          build/ChurchProjection-*-Darwin.dmg
+          build/ChurchProjection-*-Linux.tar.gz
+          build/ChurchProjection-*-Linux.deb
+        if-no-files-found: warn
