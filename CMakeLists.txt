@@ -76,7 +76,11 @@ if(WIN32)
             execute_process(
                 COMMAND \"${WINDEPLOYQT_EXE}\" --no-translations --compiler-runtime \"\${CMAKE_INSTALL_PREFIX}/bin/ChurchProjection.exe\"
                 WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/bin\"
+                RESULT_VARIABLE res
             )
+            if(NOT res EQUAL 0)
+                message(FATAL_ERROR \"windeployqt failed with error: \${res}\")
+            endif()
         ")
     endif()
 elseif(APPLE)
