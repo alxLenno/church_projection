@@ -1,0 +1,13 @@
+build/
+*.DS_Store
+*.user
+*.user.*
+*.cmake
+compile_commands.json
+.vscode/
+.idea/
+*.dmg
+*.zip
+*.exe
+*.tar.gz
+*.deb

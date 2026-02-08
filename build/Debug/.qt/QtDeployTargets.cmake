@@ -1,2 +1,0 @@
-set(__QT_DEPLOY_TARGET_ChurchProjection_FILE /Users/lennoxkk/Documents/Bible reading/church-projection/build/Debug/ChurchProjection.app/Contents/MacOS/ChurchProjection)
-set(__QT_DEPLOY_TARGET_ChurchProjection_TYPE EXECUTABLE)

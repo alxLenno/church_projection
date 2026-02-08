@@ -1,3 +1,0 @@
-# Hashes of file build rules.
-79f4a1fdf970ea3483d1b7529471666b CMakeFiles/ChurchProjection_autogen
-c3b64ae0547a4dd2b108b7dc347402e7 ChurchProjection_autogen/timestamp
