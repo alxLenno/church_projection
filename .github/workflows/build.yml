@@ -31,17 +31,29 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 x11-utils
+        sudo apt-get install -y \
+          libgl1-mesa-dev \
+          libxkbcommon-x11-0 \
+          libxcb-icccm4 \
+          libxcb-image0 \
+          libxcb-keysyms1 \
+          libxcb-randr0 \
+          libxcb-render-util0 \
+          libxcb-xinerama0 \
+          libxcb-xfixes0 \
+          libxcb-cursor0 \
+          x11-utils \
+          libegl1-mesa-dev
 
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
-      run: cmake --build build --config Release
+      run: cmake --build build --config Release --parallel
 
     - name: Package
       working-directory: build
-      run: cpack -C Release -V
+      run: cpack -C Release --verbose
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
