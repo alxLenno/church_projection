@@ -7,7 +7,6 @@
 #include <QXmlStreamReader>
 
 // Forward declaration
-QString normalizeBookName(const QString &input);
 
 BibleManager &BibleManager::instance() {
   static BibleManager instance;
@@ -36,7 +35,13 @@ void BibleManager::loadBibles() {
       appDir + "/../Resources/assets/bible",
 
       // 5. Current working directory fallback
-      QDir::currentPath() + "/assets/bible"};
+      QDir::currentPath() + "/assets/bible",
+
+#ifdef CHURCH_PROJECTION_SOURCE_DIR
+      // 6. CMake source directory (dev mode)
+      QString(CHURCH_PROJECTION_SOURCE_DIR) + "/assets/bible",
+#endif
+  };
 
   QString bibleDir;
   for (const auto &path : searchPaths) {
@@ -47,9 +52,11 @@ void BibleManager::loadBibles() {
   }
 
   if (bibleDir.isEmpty()) {
-    qWarning() << "Bible assets directory not found!";
+    qWarning() << "Bible assets directory not found! Searched:" << searchPaths;
     return;
   }
+
+  qDebug() << "Bible assets found at:" << bibleDir;
 
   QDir dir(bibleDir);
   QStringList filters;
@@ -60,6 +67,10 @@ void BibleManager::loadBibles() {
   for (const QString &file : files) {
     QString versionName = QFileInfo(file).baseName(); // e.g., "NKJV"
     parseXML(dir.absoluteFilePath(file), versionName);
+  }
+
+  if (versions.empty()) {
+    qWarning() << "No Bible versions were loaded successfully!";
   }
 
   emit bibleLoaded();
@@ -87,7 +98,11 @@ void BibleManager::parseXML(const QString &filePath,
       QString name = xml.name().toString();
 
       if (name == "b") {
-        currentBook = normalizeBookName(xml.attributes().value("n").toString());
+        QString originalName = xml.attributes().value("n").toString();
+        currentBook = normalizeBookName(originalName);
+        // Store localized name mapping: Normalized -> Original
+        // "Genesis" -> "Mwanzo"
+        data.displayNames[currentBook] = originalName;
       } else if (name == "c") {
         currentChapter = xml.attributes().value("n").toInt();
       } else if (name == "v") {
@@ -107,7 +122,7 @@ void BibleManager::parseXML(const QString &filePath,
 }
 
 // Helper to normalize book names
-QString normalizeBookName(const QString &input) {
+QString BibleManager::normalizeBookName(const QString &input) {
   static const std::map<QString, QString> bookMap = {
       {"gen", "Genesis"},
       {"genesis", "Genesis"},
@@ -241,77 +256,190 @@ QString normalizeBookName(const QString &input) {
       {"3 john", "3 John"},
       {"jud", "Jude"},
       {"jude", "Jude"},
+      // Common Abbreviations for numbered books
+      {"sam", "1 Samuel"},
+      {"samuel", "1 Samuel"},
+      {"1sam", "1 Samuel"},
+      {"2sam", "2 Samuel"},
+      {"kin", "1 Kings"},
+      {"kings", "1 Kings"},
+      {"1kings", "1 Kings"},
+      {"2kings", "2 Kings"},
+      {"chr", "1 Chronicles"},
+      {"chronicles", "1 Chronicles"},
+      {"1chron", "1 Chronicles"},
+      {"2chron", "2 Chronicles"},
+      {"cor", "1 Corinthians"},
+      {"cori", "1 Corinthians"},
+      {"corinthians", "1 Corinthians"},
+      {"1cor", "1 Corinthians"},
+      {"2cor", "2 Corinthians"},
+      {"thess", "1 Thessalonians"},
+      {"thessalonians", "1 Thessalonians"},
+      {"1thess", "1 Thessalonians"},
+      {"2thess", "2 Thessalonians"},
+      {"tim", "1 Timothy"},
+      {"timothy", "1 Timothy"},
+      {"1tim", "1 Timothy"},
+      {"2tim", "2 Timothy"},
+      {"pet", "1 Peter"},
+      {"peter", "1 Peter"},
+      {"1pet", "1 Peter"},
+      {"2pet", "2 Peter"},
+      {"joh", "John"}, // Ambiguous, but usually Gospel
+      {"john", "John"},
+      {"1john", "1 John"},
+      {"2john", "2 John"},
+      {"3john", "3 John"},
+      {"1joh", "1 John"},
+      {"2joh", "2 John"},
+      {"3joh", "3 John"},
       {"rev", "Revelation"},
       {"revelation", "Revelation"},
       // Swahili normalization
+      {"gen", "Genesis"}, // Valid in Swahili context too if mixed
       {"mwanzo", "Genesis"},
+      {"mwan", "Genesis"}, // Swahili Abbrev
       {"kutoka", "Exodus"},
+      {"kut", "Exodus"}, // Swahili Abbrev
       {"walawi", "Leviticus"},
+      {"wal", "Leviticus"},
       {"hesabu", "Numbers"},
+      {"hes", "Numbers"},
       {"kumbukumbu", "Deuteronomy"},
+      {"kum", "Deuteronomy"},
       {"kumbukumbu la torati", "Deuteronomy"},
       {"yoshua", "Joshua"},
+      {"yos", "Joshua"},
       {"waamuzi", "Judges"},
+      {"waa", "Judges"},
       {"rutu", "Ruth"},
+      {"rut", "Ruth"}, // Overlaps with English Ruth? "rut" -> Ruth. Fine.
       {"1 samweli", "1 Samuel"},
+      {"1samweli", "1 Samuel"},
+      {"1sam", "1 Samuel"}, // Swahili speakers use English abbrevs too
       {"2 samweli", "2 Samuel"},
+      {"2samweli", "2 Samuel"},
       {"1 wafalme", "1 Kings"},
+      {"1waf", "1 Kings"},
+      {"1wafalme", "1 Kings"},
       {"2 wafalme", "2 Kings"},
+      {"2waf", "2 Kings"},
+      {"2wafalme", "2 Kings"},
       {"1 mambo ya nyakati", "1 Chronicles"},
+      {"1mambo", "1 Chronicles"},
       {"2 mambo ya nyakati", "2 Chronicles"},
+      {"2mambo", "2 Chronicles"},
       {"ezra", "Ezra"},
+      {"ezr", "Ezra"},
       {"nehemia", "Nehemiah"},
+      {"neh", "Nehemiah"},
       {"esta", "Esther"},
+      {"est", "Esther"},
       {"ayubu", "Job"},
+      {"ayu", "Job"},
       {"zaburi", "Psalms"},
+      {"zab", "Psalms"},
       {"mithali", "Proverbs"},
+      {"mit", "Proverbs"},
       {"mhubiri", "Ecclesiastes"},
+      {"mhu", "Ecclesiastes"},
       {"wimbo ulio bora", "Song of Solomon"},
+      {"wim", "Song of Solomon"},
       {"isaya", "Isaiah"},
+      {"isa", "Isaiah"},
       {"yeremia", "Jeremiah"},
+      {"yer", "Jeremiah"},
       {"maombolezo", "Lamentations"},
+      {"mao", "Lamentations"},
       {"ezekieli", "Ezekiel"},
+      {"eze", "Ezekiel"},
       {"danieli", "Daniel"},
-      {"hotea", "Hosea"},
+      {"dan", "Daniel"},
+      {"hotea", "Hosea"}, // Correct spelling? Hosea in Swahili is "Hosea"
+                          // usually? XML check needed. Assuming "Hosea" or
+                          // "Hosea". User code had "hotea"?
+      {"hosea", "Hosea"},
+      {"hos", "Hosea"},
       {"yoeli", "Joel"},
+      {"yoe", "Joel"},
       {"amosi", "Amos"},
+      {"amo", "Amos"},
       {"obadia", "Obadiah"},
+      {"oba", "Obadiah"},
       {"yona", "Jonah"},
+      {"yon", "Jonah"},
       {"mika", "Micah"},
+      {"mik", "Micah"},
       {"nahumu", "Nahum"},
+      {"nah", "Nahum"},
       {"habakuki", "Habakkuk"},
+      {"hab", "Habakkuk"},
       {"sefania", "Zephaniah"},
+      {"sef", "Zephaniah"},
       {"hagai", "Haggai"},
+      {"hag", "Haggai"},
       {"zakaria", "Zechariah"},
+      {"zak", "Zechariah"},
       {"malaki", "Malachi"},
+      {"mal", "Malachi"},
       {"mathayo", "Matthew"},
+      {"mat", "Matthew"},
       {"marko", "Mark"},
+      {"mar", "Mark"},
       {"luka", "Luke"},
+      {"luk", "Luke"},
       {"yohana", "John"},
+      {"yoh", "John"},
       {"matendo", "Acts"},
+      {"mat", "Acts"}, // Conflict with Matthew? "mat" usually Matt. "matendo"
+                       // -> Acts. Maybe "mitume"?
       {"matendo ya mitume", "Acts"},
       {"warumi", "Romans"},
+      {"war", "Romans"},
       {"1 wakorintho", "1 Corinthians"},
+      {"1wak", "1 Corinthians"},
       {"2 wakorintho", "2 Corinthians"},
+      {"2wak", "2 Corinthians"},
       {"wagalatia", "Galatians"},
+      {"wag", "Galatians"},
       {"waefeso", "Ephesians"},
+      {"waef", "Ephesians"},
       {"wafilipi", "Philippians"},
+      {"waf", "Philippians"},
       {"wakolosai", "Colossians"},
+      {"wak", "Colossians"},
       {"1 wathesalonike", "1 Thessalonians"},
+      {"1wat", "1 Thessalonians"},
       {"2 wathesalonike", "2 Thessalonians"},
+      {"2wat", "2 Thessalonians"},
       {"1 timotheo", "1 Timothy"},
+      {"1tim", "1 Timothy"},
       {"2 timotheo", "2 Timothy"},
+      {"2tim", "2 Timothy"},
       {"tito", "Titus"},
+      {"tito", "Titus"}, // Same
       {"filemoni", "Philemon"},
+      {"fil", "Philemon"},
       {"waebrania", "Hebrews"},
+      {"wae", "Hebrews"},
       {"yakobo", "James"},
+      {"yak", "James"},
       {"1 petro", "1 Peter"},
+      {"1pet", "1 Peter"},
       {"2 petro", "2 Peter"},
+      {"2pet", "2 Peter"},
       {"1 yohana", "1 John"},
+      {"1yoh", "1 John"},
       {"2 yohana", "2 John"},
+      {"2yoh", "2 John"},
       {"3 yohana", "3 John"},
+      {"3yoh", "3 John"},
       {"yuda", "Jude"},
-      {"ufunuo", "Revelation"}};
+      {"yud", "Jude"},
+      {"ufunuo", "Revelation"},
+      {"ufu", "Revelation"},
+      {"ufunuo wa yohana", "Revelation"}};
 
   QString lower = input.toLower().remove('.');
   // Try strict match
@@ -467,6 +595,21 @@ QStringList BibleManager::getBooks(const QString &version) {
   return {};
 }
 
+QString BibleManager::getLocalizedBookName(const QString &book,
+                                           const QString &version) {
+  if (versions.count(version)) {
+    const auto &data = versions.at(version);
+    // data.displayNames maps Normalized -> Localized
+    // But we need to check if 'book' is normalized or not.
+    // Ideally, we normalize it first.
+    QString normalized = normalizeBookName(book);
+    if (data.displayNames.count(normalized)) {
+      return data.displayNames.at(normalized);
+    }
+  }
+  return book; // Fallback to input
+}
+
 int BibleManager::getChapterCount(const QString &book, const QString &version) {
   if (versions.count(version)) {
     const auto &data = versions.at(version);
@@ -494,8 +637,9 @@ QString BibleManager::getFirstVersion() const {
   return versions.begin()->first;
 }
 
-std::vector<BibleManager::BookInfo> BibleManager::getCanonicalBooks() const {
-  static const std::vector<BookInfo> books = {
+std::vector<BibleManager::BookInfo>
+BibleManager::getCanonicalBooks(const QString &version) const {
+  static const std::vector<BookInfo> canonicalList = {
       // Old Testament
       {"Genesis", Testament::Old, 50},
       {"Exodus", Testament::Old, 40},
@@ -564,7 +708,20 @@ std::vector<BibleManager::BookInfo> BibleManager::getCanonicalBooks() const {
       {"3 John", Testament::New, 1},
       {"Jude", Testament::New, 1},
       {"Revelation", Testament::New, 22}};
-  return books;
+
+  // If a version is provided, try to localize names
+  if (!version.isEmpty() && versions.count(version)) {
+    const auto &displayMap = versions.at(version).displayNames;
+    std::vector<BookInfo> localizedList = canonicalList;
+    for (auto &book : localizedList) {
+      if (displayMap.count(book.name)) {
+        book.name = displayMap.at(book.name);
+      }
+    }
+    return localizedList;
+  }
+
+  return canonicalList;
 }
 
 QStringList BibleManager::getVersions() const {

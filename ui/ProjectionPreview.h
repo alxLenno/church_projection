@@ -9,6 +9,7 @@
 #include <QResizeEvent>
 #include <QString>
 #include <QTextOption>
+#include <QTimer>
 #include <QVideoFrame>
 #include <QVideoSink>
 #include <QWidget>
@@ -28,6 +29,11 @@ public:
   void setLayoutType(Projection::LayoutType type);
   void clearLayer(int layerIdx);
 
+  void setLayerFormatting(int layerIdx, const Projection::TextFormatting &fmt);
+  void setLayerMedia(int layerIdx, Projection::Content::MediaType type,
+                     const QString &path, int page = 0,
+                     const QImage &rendered = QImage());
+
   // Legacy API Mappings
   void updateText(const QString &text);
   void setBackgroundImage(const QString &path);
@@ -46,12 +52,19 @@ private:
     QVideoSink *videoSink = nullptr;
     Projection::Content content;
     bool isVideoActive = false;
+
+    // Scrolling
+    float scrollOffset = 0.0f;
   };
 
   std::vector<LayerState *> layers;
   Projection::LayoutType currentLayout;
+  QTimer *renderTimer;
 
-  void drawContent(QPainter &painter, int idx, const QRect &rect);
-  void drawText(QPainter &painter, const QString &text, const QRect &rect);
+  void drawContent(QPainter &painter, int idx, const QRect &rect,
+                   bool drawBg = true);
+  void drawBackground(QPainter &painter, int layerIdx, const QRect &rect);
+  void drawText(QPainter &painter, const Projection::Content &content,
+                const QRect &rect, float scrollOffset = 0.0f);
   void setupLayer(int idx);
 };

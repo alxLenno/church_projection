@@ -16,13 +16,21 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 COMPONENTS Widgets Multimedia MultimediaWidgets OpenGLWidgets REQUIRED)
 qt_standard_project_setup()
 
+# macOS App Icon
+set(MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
+set(APP_ICON_MACOS "${CMAKE_SOURCE_DIR}/assets/AppIcon.icns")
+set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
 add_executable(ChurchProjection MACOSX_BUNDLE
+    ${APP_ICON_MACOS}
     main.cpp
     core/Song.h
     core/SongManager.h
     core/ThemeManager.h
     core/ThemeManager.cpp
     core/BibleManager.cpp
+    core/PdfRenderer.h
+    core/PdfRenderer.cpp
     ui/ControlWindow.cpp
     ui/ControlWindow.h
     ui/ProjectionPreview.cpp
@@ -37,6 +45,16 @@ add_executable(ChurchProjection MACOSX_BUNDLE
 
 # Link Qt
 target_link_libraries(ChurchProjection Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets Qt6::OpenGLWidgets)
+
+# Link CoreGraphics on macOS for PDF rendering
+if(APPLE)
+    target_link_libraries(ChurchProjection "-framework CoreGraphics")
+endif()
+
+# Dev-mode asset path so BibleManager can find assets from source tree
+target_compile_definitions(ChurchProjection PRIVATE
+    CHURCH_PROJECTION_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 # --- Installation and Packaging ---
 
@@ -99,7 +117,7 @@ endif()
 set(CPACK_PACKAGE_NAME "ChurchProjection")
 set(CPACK_PACKAGE_VENDOR "LennoxKK")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Church Projection System")
-set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION "1.1.0")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "ChurchProjection")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE") # Optional: Create a LICENSE file if needed
 

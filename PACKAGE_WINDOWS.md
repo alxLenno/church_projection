@@ -45,7 +45,7 @@ If you have [NSIS](https://nsis.sourceforge.io/Download) installed, you can gene
 ```cmd
 cpack -C Release
 ```
-This will create `ChurchProjection-1.0.0-win64.exe` in your build directory.
+This will create `ChurchProjection-1.1.0-win64.exe` in your build directory.
 
 ---
 

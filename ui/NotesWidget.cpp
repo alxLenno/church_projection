@@ -155,8 +155,12 @@ void NotesWidget::performSearch(const QString &query) {
 
   resultsList->clear();
   for (const auto &verse : results) {
+    // Localize book name
+    QString displayBook =
+        BibleManager::instance().getLocalizedBookName(verse.book, version);
+
     QString label = QString("%1 %2:%3\n%4")
-                        .arg(verse.book)
+                        .arg(displayBook)
                         .arg(verse.chapter)
                         .arg(verse.verse)
                         .arg(verse.text);
@@ -165,7 +169,7 @@ void NotesWidget::performSearch(const QString &query) {
     // Store text to project
     item->setData(Qt::UserRole, verse.text);
     item->setData(Qt::UserRole + 1, QString("%1 %2:%3")
-                                        .arg(verse.book)
+                                        .arg(displayBook)
                                         .arg(verse.chapter)
                                         .arg(verse.verse));
     resultsList->addItem(item);

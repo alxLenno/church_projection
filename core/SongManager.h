@@ -1,5 +1,6 @@
 #pragma once
 #include "Song.h"
+#include <QDebug>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -33,8 +34,10 @@ public:
   void saveSongs() {
     QString path = getStoragePath();
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    if (!file.open(QIODevice::WriteOnly)) {
+      qWarning() << "Failed to save songs to:" << path << file.errorString();
       return;
+    }
 
     QJsonArray array;
     for (const auto &song : songs) {
@@ -52,13 +55,22 @@ public:
   void loadSongs() {
     QString path = getStoragePath();
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
+    if (!file.open(QIODevice::ReadOnly)) {
+      // File doesn't exist yet — not an error on first run
       return;
+    }
 
     QByteArray data = file.readAll();
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isArray())
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+      qWarning() << "Song file JSON parse error:" << parseError.errorString();
       return;
+    }
+    if (!doc.isArray()) {
+      qWarning() << "Song file is not a valid JSON array";
+      return;
+    }
 
     songs.clear();
     QJsonArray array = doc.array();

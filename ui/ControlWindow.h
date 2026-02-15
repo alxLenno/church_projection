@@ -1,19 +1,28 @@
 #pragma once
+#include "../core/PdfRenderer.h"
 #include "../core/SongManager.h"
 #include "../core/ThemeManager.h"
 #include "NotesWidget.h"
 #include "ProjectionPreview.h"
 #include "ProjectionWindow.h"
+#include <QCheckBox>
+#include <QCloseEvent>
 #include <QComboBox>
+#include <QFileDialog>
+#include <QFontComboBox>
 #include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QImageReader>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QShortcut>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -45,6 +54,9 @@ public:
   explicit ControlWindow(ProjectionWindow *proj, SongManager *sm,
                          ThemeManager *tm, QWidget *parent = nullptr);
 
+protected:
+  void closeEvent(QCloseEvent *event) override;
+
 private slots:
   // Song Management
   void onSongSelected(int index);
@@ -58,13 +70,13 @@ private slots:
   void onBookSelected(const QString &book);
   void onChapterSelected(int chapter);
   void onVerseSelected(int verse);
-  void onBibleBackClicked(); // Go up one level
+  void onBibleBackClicked();
   void onBibleVerseSelected(QListWidgetItem *item);
-  void onQuickSearch(); // Keep search bar maybe?
+  void onQuickSearch();
 
   // Projection
-  void projectVerse(int index);                // From Song
-  void projectBibleVerse(const QString &text); // From Bible
+  void projectVerse(int index);
+  void projectBibleVerse(const QString &text);
   void nextVerse();
   void prevVerse();
   void onClearTextClicked();
@@ -76,7 +88,7 @@ private slots:
   void selectImage();
   void selectVideo();
   void selectColor();
-  void saveCurrentVideoAsTemplate(); // Deprecated? Replaced by createNewTheme
+  void saveCurrentVideoAsTemplate();
   void createNewTheme();
   void updateThemeTab();
   void applyTheme(const QString &themeName);
@@ -108,7 +120,7 @@ private:
 
   // Central (Workspace)
   // -- Bible Tab --
-  QSplitter *bibleSplitter; // Vertical: Content | Navigation
+  QSplitter *bibleSplitter;
   QListWidget *bibleVerseList;
   QLineEdit *bibleQuickSearch;
   QButtonGroup *bibleVersionButtons;
@@ -120,25 +132,34 @@ private:
   QWidget *bookGridPage;
   QWidget *chapterGridPage;
   QWidget *verseGridPage;
-  QLabel *navHeaderLabel;  // "Genesis > Chapter 1"
-  QPushButton *navBackBtn; // To be removed or kept as secondary? Plan says
-                           // "seamless bottom navigation". User request: "nav
-                           // at the bottom". Let's keep back button in header
-                           // for now, but focus on bottom nav.
+  QLabel *navHeaderLabel;
+  QPushButton *navBackBtn;
 
   // Bottom Navigation
   QPushButton *navBooksBtn;
   QPushButton *navChaptersBtn;
   QPushButton *navVersesBtn;
 
-  // Stage Controls (Layout & Layer Targeting)
+  // Stage Controls
   QComboBox *projectionLayoutCombo;
   QComboBox *targetLayerCombo;
+  QComboBox *screenSelectorCombo; // New: screen selector
   int currentTargetLayer = 0;
 
+  // Text Formatting Controls
+  QSpinBox *fontSizeSpin;
+  QSpinBox *marginSpin;
+  QFontComboBox *fontCombo;
+  QComboBox *alignmentCombo;
+  QCheckBox *scrollCheckBox;
+
+  void updateFormatting();
+  void loadLayerSettings(int layerIdx);
   void updateBibleNavButtons();
+  void setupKeyboardShortcuts(); // New
 
   // Grid Containers
+  QVBoxLayout *bookGridContentLayout;
   QGridLayout *chapterGridLayout;
   QGridLayout *verseGridLayout;
 
@@ -154,6 +175,23 @@ private:
   QPushButton *nextBtn;
   QPushButton *prevBtn;
 
+  // -- Media Tab --
+  void setupMediaTab(QWidget *container);
+  void addMediaFile();
+  void removeMediaFile();
+  void onMediaFileSelected(QListWidgetItem *item);
+  void onMediaPageSelected(QListWidgetItem *item);
+
+  struct MediaItem {
+    QString path;
+    Projection::Content::MediaType type;
+    int pageCount = 0;
+  };
+  std::vector<MediaItem> mediaItems;
+  QListWidget *mediaFileList;
+  QListWidget *mediaPageList;
+  int currentMediaIndex = -1;
+
   // -- Controls --
   QPushButton *presentBtn;
   QLabel *liveStatusLabel;
@@ -165,7 +203,10 @@ private:
 
   // Themes
   QGroupBox *videoThemesGroup;
-  QVBoxLayout *videoThemesLayout;
+  QGridLayout *videoThemesLayout;
+
+  void loadMedia();
+  void saveMedia();
 
   void setupSidebar(QWidget *container);
   void setupMainWorkspace(QWidget *container);
@@ -177,6 +218,7 @@ private:
   void setupBookGrid(QWidget *page);
   void setupChapterGrid(QWidget *page);
   void setupVerseGrid(QWidget *page);
+  void refreshBookGrid();
   void populateChapterGrid(const QString &book);
   void populateVerseGrid(int chapter);
 
@@ -186,6 +228,9 @@ private:
   bool isPresenting = false;
   bool isTextVisible = true;
   bool isScreenBlackened = false;
+
+  // Last projected content — for restore after blackout
+  QString lastProjectedText;
 
   QString currentBGPath;
   bool isVideoActive = false;

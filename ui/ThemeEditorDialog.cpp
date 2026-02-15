@@ -1,14 +1,33 @@
 #include "ThemeEditorDialog.h"
 #include <QColorDialog>
+#include <QDebug>
 #include <QDialogButtonBox>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 ThemeEditorDialog::ThemeEditorDialog(QWidget *parent) : QDialog(parent) {
   setWindowTitle("Create New Theme");
   resize(400, 300);
 
+  // Dark theme matching ControlWindow
+  setStyleSheet(
+      "QDialog { background: #0f172a; color: #e2e8f0; }"
+      "QLabel { color: #94a3b8; font-weight: bold; font-size: 12px; }"
+      "QLineEdit { background: #1e293b; color: white; border: 1px solid "
+      "#334155; "
+      "  border-radius: 6px; padding: 8px; }"
+      "QLineEdit:focus { border-color: #38bdf8; }"
+      "QComboBox { background: #1e293b; color: white; border: 1px solid "
+      "#334155; "
+      "  border-radius: 6px; padding: 6px; }"
+      "QPushButton { background: #334155; color: white; border: none; "
+      "  border-radius: 6px; padding: 8px 16px; font-weight: bold; }"
+      "QPushButton:hover { background: #475569; }"
+      "QPushButton:pressed { background: #38bdf8; color: #0f172a; }"
+      "QDialogButtonBox QPushButton { min-width: 80px; }");
   auto *layout = new QVBoxLayout(this);
 
   // Name
@@ -54,8 +73,11 @@ ThemeEditorDialog::ThemeEditorDialog(QWidget *parent) : QDialog(parent) {
 
   connect(typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
           &ThemeEditorDialog::updateUI);
-  connect(browseBtn, &QPushButton::clicked, this,
-          &ThemeEditorDialog::selectContent);
+
+  connect(browseBtn, &QPushButton::clicked, this, [this]() {
+    qDebug() << "Browse button clicked";
+    selectContent();
+  });
   connect(colorBtn, &QPushButton::clicked, [this]() {
     QColor c = QColorDialog::getColor(selectedColor, this, "Pick Theme Color");
     if (c.isValid()) {
@@ -109,13 +131,54 @@ void ThemeEditorDialog::updateUI() {
 
 void ThemeEditorDialog::selectContent() {
   ThemeType type = static_cast<ThemeType>(typeCombo->currentData().toInt());
-  QString filter = (type == ThemeType::Video)
-                       ? "Videos (*.mp4 *.mov *.avi *.mkv)"
-                       : "Images (*.png *.jpg *.jpeg *.bmp)";
-  QString path = QFileDialog::getOpenFileName(this, "Select Media", "", filter);
+  qDebug() << "Selecting content. Current Type:" << (int)type;
+
+  // Allow both filters but prioritize current type
+  QString filters;
+  QString videoFilter = "Videos (*.mp4 *.mov *.avi *.mkv *.webm)";
+  QString imageFilter = "Images (*.png *.jpg *.jpeg *.bmp *.gif)";
+  QString allFilter = "All Files (*)";
+
+  if (type == ThemeType::Video) {
+    filters = videoFilter + ";;" + imageFilter + ";;" + allFilter;
+  } else {
+    filters = imageFilter + ";;" + videoFilter + ";;" + allFilter;
+  }
+
+  // Default to Downloads folder
+  QString defaultDir =
+      QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+  qDebug() << "Opening File Dialog in:" << defaultDir;
+
+  QString path = QFileDialog::getOpenFileName(
+      this, "Select Media", defaultDir, filters, nullptr,
+      QFileDialog::DontUseNativeDialog); // Force non-native to debug macOS
+                                         // issue
+
+  qDebug() << "Selected path:" << path;
 
   if (!path.isEmpty()) {
     selectedPath = path;
+
+    // Auto-detect type mismatch?
+    QFileInfo fi(path);
+    QString ext = fi.suffix().toLower();
+    if (ext == "mp4" || ext == "mov" || ext == "avi" || ext == "mkv" ||
+        ext == "webm") {
+      if (type != ThemeType::Video) {
+        int idx = typeCombo->findData(static_cast<int>(ThemeType::Video));
+        if (idx >= 0)
+          typeCombo->setCurrentIndex(idx);
+      }
+    } else if (ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp" ||
+               ext == "gif") {
+      if (type != ThemeType::Image) {
+        int idx = typeCombo->findData(static_cast<int>(ThemeType::Image));
+        if (idx >= 0)
+          typeCombo->setCurrentIndex(idx);
+      }
+    }
+
     updateUI();
   }
 }

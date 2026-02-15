@@ -22,6 +22,9 @@ class BibleManager : public QObject {
 public:
   static BibleManager &instance();
 
+  // Normalize book name to standard English name (e.g. "Mwanzo" -> "Genesis")
+  static QString normalizeBookName(const QString &input);
+
   // Loads Bible data from XML files in assets/bible
   void loadBibles();
 
@@ -41,6 +44,10 @@ public:
   // Get list of books available in a version
   QStringList getBooks(const QString &version = "NKJV");
 
+  // Get localized book name (e.g., "Genesis" -> "Mwanzo" for SWAB)
+  QString getLocalizedBookName(const QString &book,
+                               const QString &version = "NKJV");
+
   // Get number of chapters in a book
   int getChapterCount(const QString &book, const QString &version = "NKJV");
 
@@ -59,7 +66,8 @@ public:
   };
 
   // Get books in canonical order with metadata
-  std::vector<BookInfo> getCanonicalBooks() const;
+  // If version is provided, localized names are returned
+  std::vector<BookInfo> getCanonicalBooks(const QString &version = "") const;
 
 signals:
   void bibleLoaded();
@@ -70,6 +78,8 @@ private:
   struct BibleData {
     // Map: Book Name -> Chapter Num -> Verse Num -> Text
     std::map<QString, std::map<int, std::map<int, QString>>> content;
+    // Normalized Name -> Localized Name (e.g., "Genesis" -> "Mwanzo")
+    std::map<QString, QString> displayNames;
   };
 
   std::map<QString, BibleData> versions; // Version Name (e.g., "NKJV") -> Data

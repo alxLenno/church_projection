@@ -11,6 +11,23 @@ ProjectionPreview::ProjectionPreview(QWidget *parent) : QOpenGLWidget(parent) {
   currentLayout = LayoutType::Single;
   setupLayer(0);
   setupLayer(1);
+
+  // Timer for preview animation — only updates when scrolling
+  renderTimer = new QTimer(this);
+  connect(renderTimer, &QTimer::timeout, this, [this]() {
+    bool needsUpdate = false;
+    for (auto len : layers) {
+      if (len->content.formatting.isScrolling && !len->content.text.isEmpty()) {
+        len->scrollOffset += (float)len->content.formatting.scrollSpeed;
+        needsUpdate = true;
+      } else {
+        len->scrollOffset = 0;
+      }
+    }
+    if (needsUpdate)
+      update();
+  });
+  renderTimer->start(16);
 }
 
 void ProjectionPreview::setupLayer(int idx) {
@@ -53,6 +70,10 @@ void ProjectionPreview::setLayerBackground(int layerIdx, BackgroundType type,
   ls->content.bgPath = path;
   ls->content.bgColor = color;
 
+  // Invalidate pixmap cache
+  ls->content.cachedPixmap = QPixmap();
+  ls->content.cachedPixmapSize = QSize();
+
   if (type == BackgroundType::Video) {
     ls->isVideoActive = true;
     ls->mediaPlayer->setSource(QUrl::fromLocalFile(path));
@@ -76,9 +97,48 @@ void ProjectionPreview::clearLayer(int layerIdx) {
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   LayerState *ls = layers[layerIdx];
+
+  // Save formatting BEFORE reset (matches ProjectionWindow fix)
+  auto savedFmt = ls->content.formatting;
+
   ls->mediaPlayer->stop();
   ls->isVideoActive = false;
+  ls->isVideoActive = false;
   ls->content = Content();
+
+  // Ensure media is cleared
+  ls->content.mediaType = Content::MediaType::None;
+  ls->content.renderedMedia = QImage();
+
+  ls->content.formatting = savedFmt;
+
+  update();
+}
+
+void ProjectionPreview::setLayerMedia(int layerIdx,
+                                      Projection::Content::MediaType type,
+                                      const QString &path, int page,
+                                      const QImage &rendered) {
+  if (layerIdx < 0 || layerIdx >= (int)layers.size())
+    return;
+
+  LayerState *ls = layers[layerIdx];
+  ls->content.mediaType = type;
+  ls->content.mediaPath = path;
+  ls->content.pageNumber = page;
+  ls->content.renderedMedia = rendered;
+
+  // Clear text if media is set (optional, but typical)
+  ls->content.text = "";
+
+  update();
+}
+
+void ProjectionPreview::setLayerFormatting(
+    int layerIdx, const Projection::TextFormatting &fmt) {
+  if (layerIdx < 0 || layerIdx >= (int)layers.size())
+    return;
+  layers[layerIdx]->content.formatting = fmt;
   update();
 }
 
@@ -105,6 +165,11 @@ void ProjectionPreview::clear() {
 }
 
 void ProjectionPreview::resizeEvent(QResizeEvent *event) {
+  // Invalidate all cached pixmaps on resize
+  for (auto *ls : layers) {
+    ls->content.cachedPixmap = QPixmap();
+    ls->content.cachedPixmapSize = QSize();
+  }
   QOpenGLWidget::resizeEvent(event);
 }
 
@@ -114,16 +179,35 @@ void ProjectionPreview::paintEvent(QPaintEvent *event) {
   painter.setRenderHint(QPainter::TextAntialiasing);
   painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
+  // Background Fill
+  painter.fillRect(rect(), Qt::black);
+
   if (currentLayout == LayoutType::Single) {
-    drawContent(painter, 0, rect());
+    drawContent(painter, 0, rect(), true);
   } else if (currentLayout == LayoutType::SplitVertical) {
     int mid = width() / 2;
-    drawContent(painter, 0, QRect(0, 0, mid, height()));
-    drawContent(painter, 1, QRect(mid, 0, width() - mid, height()));
+    QRect leftRect(0, 0, mid, height());
+    QRect rightRect(mid, 0, width() - mid, height());
+
+    drawContent(painter, 0, leftRect, true);
+    drawContent(painter, 1, rightRect, true);
+
+    // Separator
+    painter.setPen(QPen(QColor(255, 255, 255, 100), 2));
+    painter.drawLine(mid, 0, mid, height());
+
   } else if (currentLayout == LayoutType::SplitHorizontal) {
+    // Horizontal Split with Independent Backgrounds
     int mid = height() / 2;
-    drawContent(painter, 0, QRect(0, 0, width(), mid));
-    drawContent(painter, 1, QRect(0, mid, width(), height() - mid));
+    QRect topRect(0, 0, width(), mid);
+    QRect bottomRect(0, mid, width(), height() - mid);
+
+    drawContent(painter, 0, topRect, true);
+    drawContent(painter, 1, bottomRect, true);
+
+    // Horizontal Separator
+    painter.setPen(QPen(QColor(255, 255, 255, 100), 2));
+    painter.drawLine(0, mid, width(), mid);
   }
 
   // Border
@@ -134,74 +218,224 @@ void ProjectionPreview::paintEvent(QPaintEvent *event) {
   painter.drawRect(rect().adjusted(1, 1, -1, -1));
 }
 
-void ProjectionPreview::drawContent(QPainter &painter, int idx,
-                                    const QRect &rect) {
+void ProjectionPreview::drawBackground(QPainter &painter, int idx,
+                                       const QRect &rect) {
   if (idx < 0 || idx >= (int)layers.size())
     return;
   LayerState *ls = layers[idx];
-  const Content &c = ls->content;
+  Content &c = ls->content;
 
-  // Background Fill
-  painter.fillRect(rect, Qt::black);
+  painter.save();
+  painter.setClipRect(rect);
 
   if (ls->isVideoActive && c.videoFrame.isValid()) {
     QImage img = c.videoFrame.toImage();
-    QSize scaledSize = img.size().scaled(rect.size(), Qt::KeepAspectRatio);
+    QSize scaledSize =
+        img.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
     QRect targetRect(rect.center().x() - scaledSize.width() / 2,
                      rect.center().y() - scaledSize.height() / 2,
                      scaledSize.width(), scaledSize.height());
     painter.drawImage(targetRect, img);
   } else if (!c.pixmap.isNull()) {
-    QSize scaledSize = c.pixmap.size().scaled(rect.size(), Qt::KeepAspectRatio);
-    QRect targetRect(rect.center().x() - scaledSize.width() / 2,
-                     rect.center().y() - scaledSize.height() / 2,
-                     scaledSize.width(), scaledSize.height());
-    painter.drawPixmap(targetRect,
-                       c.pixmap.scaled(scaledSize, Qt::IgnoreAspectRatio,
-                                       Qt::SmoothTransformation));
+    // Use cached scaled pixmap
+    if (c.cachedPixmapSize != rect.size()) {
+      QSize scaledSize =
+          c.pixmap.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
+      c.cachedPixmap = c.pixmap.scaled(scaledSize, Qt::IgnoreAspectRatio,
+                                       Qt::SmoothTransformation);
+      c.cachedPixmapSize = rect.size();
+    }
+    QRect targetRect(rect.center().x() - c.cachedPixmap.width() / 2,
+                     rect.center().y() - c.cachedPixmap.height() / 2,
+                     c.cachedPixmap.width(), c.cachedPixmap.height());
+    painter.drawPixmap(targetRect, c.cachedPixmap);
   } else if (c.bgType == BackgroundType::Color) {
     painter.fillRect(rect, c.bgColor);
   }
 
+  painter.restore();
+}
+
+void ProjectionPreview::drawContent(QPainter &painter, int idx,
+                                    const QRect &rect, bool drawBg) {
+  if (idx < 0 || idx >= (int)layers.size())
+    return;
+  LayerState *ls = layers[idx];
+  Content &c = ls->content;
+
+  if (drawBg) {
+    drawBackground(painter, idx, rect);
+  }
+
+  // Draw Media
+  if (c.mediaType == Content::MediaType::Image ||
+      c.mediaType == Content::MediaType::Pdf) {
+    if (!c.renderedMedia.isNull()) {
+      // Fit, scaled (thumbnails might be small, so we might need to re-render
+      // or scale up? Actually, c.renderedMedia might be the FULL RES one from
+      // ControlWindow when "Project" is clicked. BUT for PREVIEW, we might want
+      // to use the same rendered image. Is c.renderedMedia shared? Yes, passed
+      // by const ref.
+
+      QSize imgSize = c.renderedMedia.size();
+      QSize scaledSize = imgSize.scaled(rect.size(), Qt::KeepAspectRatio);
+      QRect targetRect(rect.center().x() - scaledSize.width() / 2,
+                       rect.center().y() - scaledSize.height() / 2,
+                       scaledSize.width(), scaledSize.height());
+
+      painter.drawImage(targetRect, c.renderedMedia);
+    }
+  }
+
   if (!c.text.isEmpty()) {
-    drawText(painter, c.text, rect);
+    drawText(painter, c, rect, ls->scrollOffset);
   }
 }
 
-void ProjectionPreview::drawText(QPainter &painter, const QString &text,
-                                 const QRect &rect) {
-  int fontSize = rect.height() / 8;
-  if (fontSize < 8)
-    fontSize = 8;
-
-  QRect textRect = rect.adjusted(10, 10, -10, -10);
-  QTextOption option;
-  option.setAlignment(Qt::AlignCenter);
-  option.setWrapMode(QTextOption::WordWrap);
-
-  // Dynamic scaling for preview
-  while (fontSize > 6) {
-    QFont font("Arial", fontSize, QFont::Bold);
-    painter.setFont(font);
-    QRectF boundingRect = painter.boundingRect(textRect, text, option);
-    if (boundingRect.height() <= textRect.height() &&
-        boundingRect.width() <= textRect.width()) {
-      break;
-    }
-    fontSize -= 1;
+// Helper: Draw text with shadow and outline for readability (scaled for
+// preview)
+static void drawStyledTextPreview(QPainter &painter, const QRectF &rect,
+                                  const QString &text,
+                                  const QTextOption &option,
+                                  const TextFormatting &fmt,
+                                  float scaleFactor) {
+  // Draw text shadow (scaled)
+  if (fmt.textShadow) {
+    painter.setPen(QColor(0, 0, 0, 180));
+    int offset = qMax(1, (int)(2 * scaleFactor));
+    QRectF shadowRect = rect.translated(offset, offset);
+    painter.drawText(shadowRect, text, option);
   }
 
-  QFont font("Arial", fontSize, QFont::Bold);
-  painter.setFont(font);
-  QRectF boundingRect = painter.boundingRect(textRect, text, option);
+  // Draw text outline (scaled)
+  if (fmt.outlineWidth > 0) {
+    painter.setPen(QColor(0, 0, 0, 200));
+    int ow = qMax(1, (int)(fmt.outlineWidth * scaleFactor));
+    for (int dx = -ow; dx <= ow; dx += ow) {
+      for (int dy = -ow; dy <= ow; dy += ow) {
+        if (dx == 0 && dy == 0)
+          continue;
+        painter.drawText(rect.translated(dx, dy), text, option);
+      }
+    }
+  }
 
-  qreal padding = 5;
-  QRectF bgRect = boundingRect.adjusted(-padding, -padding, padding, padding);
-
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(QColor(0, 0, 0, 150));
-  painter.drawRoundedRect(bgRect, 5, 5);
-
+  // Draw main text
   painter.setPen(Qt::white);
-  painter.drawText(textRect, text, option);
+  painter.drawText(rect, text, option);
+}
+
+void ProjectionPreview::drawText(QPainter &painter,
+                                 const Projection::Content &content,
+                                 const QRect &rect, float scrollOffset) {
+  const auto &fmt = content.formatting;
+  const QString &text = content.text;
+
+  // Scale factor
+  float scaleFactor = (float)rect.height() / 1080.0f;
+
+  // Apply Margin
+  int m = (int)(fmt.margin * scaleFactor);
+  if (m < 2)
+    m = 2; // Min margin
+  QRect textRect = rect.adjusted(m, m, -m, -m);
+
+  QTextOption option;
+  option.setAlignment((Qt::Alignment)fmt.alignment | Qt::AlignVCenter);
+  option.setWrapMode(QTextOption::WordWrap);
+
+  int fontSize = fmt.fontSize;
+  if (fontSize <= 0) {
+    if (fmt.isScrolling) {
+      int targetLines = 8;
+      int targetSize = rect.height() / targetLines;
+      if (targetSize < (int)(15 * scaleFactor))
+        targetSize = (int)(15 * scaleFactor);
+      if (targetSize > (int)(60 * scaleFactor))
+        targetSize = (int)(60 * scaleFactor);
+      fontSize = targetSize;
+    } else {
+      int maxScaled = (int)(150 * scaleFactor);
+      fontSize = maxScaled;
+    }
+
+    // Auto-fit loop
+    while (fontSize > 4) {
+      QFont font(fmt.fontFamily, fontSize, QFont::Bold);
+      painter.setFont(font);
+      QRectF boundingRect = painter.boundingRect(textRect, text, option);
+
+      bool fits = false;
+      if (fmt.isScrolling) {
+        if (boundingRect.width() <= textRect.width())
+          fits = true;
+      } else {
+        if (boundingRect.height() <= textRect.height() &&
+            boundingRect.width() <= textRect.width())
+          fits = true;
+      }
+      if (fits)
+        break;
+      fontSize -= 1;
+    }
+  } else {
+    fontSize = (int)(fontSize * scaleFactor);
+    if (fontSize < 4)
+      fontSize = 4;
+  }
+
+  QFont font(fmt.fontFamily, fontSize, QFont::Bold);
+  painter.setFont(font);
+
+  // Scrolled Drawing Logic (Scaled)
+  if (fmt.isScrolling) {
+    QRectF bRect = painter.boundingRect(
+        QRectF(textRect.left(), textRect.top(), textRect.width(), 0), text,
+        option);
+    qreal textHeight = bRect.height();
+    float scaledOffset = scrollOffset * scaleFactor;
+    qreal visibleHeight = textRect.height();
+    qreal gap = visibleHeight * 0.3;
+    qreal totalLoopHeight = textHeight + gap;
+
+    qreal shift = fmod((double)scaledOffset, (double)totalLoopHeight);
+    qreal startY = textRect.bottom() - shift;
+
+    painter.save();
+    painter.setClipRect(textRect);
+
+    QRectF drawRect1(textRect.left(), startY, textRect.width(), textHeight);
+    drawStyledTextPreview(painter, drawRect1, text, option, fmt, scaleFactor);
+
+    qreal nextY = startY + textHeight + gap;
+    if (nextY < textRect.bottom()) {
+      QRectF drawRect2(textRect.left(), nextY, textRect.width(), textHeight);
+      drawStyledTextPreview(painter, drawRect2, text, option, fmt, scaleFactor);
+    }
+
+    if (startY > textRect.top()) {
+      qreal prevY = startY - totalLoopHeight;
+      if (prevY + textHeight > textRect.top()) {
+        QRectF drawRectPrev(textRect.left(), prevY, textRect.width(),
+                            textHeight);
+        drawStyledTextPreview(painter, drawRectPrev, text, option, fmt,
+                              scaleFactor);
+      }
+    }
+
+    painter.restore();
+
+  } else {
+    // Static Text
+    QRectF boundingRect = painter.boundingRect(textRect, text, option);
+    qreal padding = 20 * scaleFactor;
+    QRectF bgRect = boundingRect.adjusted(-padding, -padding, padding, padding);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 150));
+    painter.drawRoundedRect(bgRect, 5, 5);
+
+    drawStyledTextPreview(painter, QRectF(textRect), text, option, fmt,
+                          scaleFactor);
+  }
 }

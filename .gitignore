@@ -11,3 +11,6 @@ compile_commands.json
 *.exe
 *.tar.gz
 *.deb
+
+build-release/
+.cache/
