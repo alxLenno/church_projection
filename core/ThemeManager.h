@@ -116,6 +116,7 @@ signals:
 private:
   void loadTemplates() {
     templates.clear();
+    bool needsSave = false;
     int size = settings.beginReadArray("templates");
     for (int i = 0; i < size; ++i) {
       settings.setArrayIndex(i);
@@ -125,6 +126,7 @@ private:
       // Skip entries with missing name (corrupt data)
       if (t.name.isEmpty()) {
         qWarning() << "Skipping corrupt theme entry at index" << i;
+        needsSave = true;
         continue;
       }
 
@@ -141,9 +143,24 @@ private:
         t.color = settings.value("color", QColor(Qt::black)).value<QColor>();
       }
 
+      // VALIDATION: Check if file exists
+      if (t.type != ThemeType::Color && !t.contentPath.isEmpty()) {
+        QFileInfo fi(t.contentPath);
+        if (!fi.exists()) {
+          qWarning() << "Removing invalid theme:" << t.name
+                     << "Path:" << t.contentPath;
+          needsSave = true;
+          continue;
+        }
+      }
+
       templates.push_back(t);
     }
     settings.endArray();
+
+    if (needsSave) {
+      saveTemplates();
+    }
   }
 
   void loadDefaultThemes() {
