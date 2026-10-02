@@ -21,7 +21,7 @@ set(MACOSX_BUNDLE_ICON_FILE AppIcon.icns)
 set(APP_ICON_MACOS "${CMAKE_SOURCE_DIR}/assets/AppIcon.icns")
 set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 
-add_executable(ChurchProjection MACOSX_BUNDLE
+add_executable(ChurchProjection WIN32 MACOSX_BUNDLE
     ${APP_ICON_MACOS}
     main.cpp
     core/Song.h
