@@ -1,6 +1,7 @@
 name: Build and Package
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "master" ]
   pull_request:
@@ -21,10 +22,11 @@ jobs:
     - name: Install Qt
       uses: jurplel/install-qt-action@v4
       with:
-        version: '6.5.3' # Long Term Support version
+        version: '6.10.2'
+        modules: 'qtmultimedia qtwebengine qtwebchannel qtpositioning'
         host: ${{ matrix.os == 'macos-latest' && 'mac' || (matrix.os == 'windows-latest' && 'windows' || 'linux') }}
         target: 'desktop'
-        arch: ${{ matrix.os == 'windows-latest' && 'win64_msvc2019_64' || '' }}
+        arch: ${{ matrix.os == 'windows-latest' && 'win64_msvc2022_64' || '' }}
 
     # Linux specific dependencies
     - name: Install Linux Dependencies
@@ -46,14 +48,14 @@ jobs:
           libegl1-mesa-dev
 
     - name: Configure CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: cmake -B build -DCMAKE_BUILD_TYPE=MinSizeRel
 
     - name: Build
-      run: cmake --build build --config Release --parallel
+      run: cmake --build build --config MinSizeRel --parallel
 
     - name: Package
       working-directory: build
-      run: cpack -C Release --verbose
+      run: cpack -C MinSizeRel --verbose
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
@@ -63,6 +65,7 @@ jobs:
           build/ChurchProjection-*-win64.exe
           build/ChurchProjection-*-win64.zip
           build/ChurchProjection-*-Darwin.dmg
+          build/ChurchProjection-*-Darwin.zip
           build/ChurchProjection-*-Linux.tar.gz
           build/ChurchProjection-*-Linux.deb
         if-no-files-found: warn

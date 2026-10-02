@@ -4,6 +4,8 @@
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QWidget>
+#include "../core/ScriptureLookup.h"
+#include <QTimer>
 
 class NotesWidget : public QWidget {
   Q_OBJECT
@@ -22,6 +24,11 @@ private slots:
   void refreshVersions();
 
 private:
+  ScriptureLookup *aiLookup;
+  QTimer *searchTimer;
+  QString pendingQuery;
+  int searchRevision = 0;
+  void showResults(const std::vector<BibleVerse> &results, const QString &version);
   QTextEdit *editor;
   QListWidget *resultsList;
   class QButtonGroup *versionButtonGroup;

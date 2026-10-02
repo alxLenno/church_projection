@@ -13,7 +13,7 @@ set(CMAKE_AUTORCC ON)
 #     set(CMAKE_PREFIX_PATH "/Users/lennoxkk/Qt/6.10.2/macos")
 # endif()
 
-find_package(Qt6 COMPONENTS Widgets Multimedia MultimediaWidgets OpenGLWidgets REQUIRED)
+find_package(Qt6 COMPONENTS Widgets Multimedia MultimediaWidgets OpenGLWidgets WebEngineWidgets Network REQUIRED)
 qt_standard_project_setup()
 
 # macOS App Icon
@@ -44,7 +44,7 @@ add_executable(ChurchProjection MACOSX_BUNDLE
 )
 
 # Link Qt
-target_link_libraries(ChurchProjection Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets Qt6::OpenGLWidgets)
+target_link_libraries(ChurchProjection Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets Qt6::OpenGLWidgets Qt6::WebEngineWidgets Qt6::Network)
 
 # Link CoreGraphics on macOS for PDF rendering
 if(APPLE)
@@ -70,9 +70,9 @@ install(TARGETS ChurchProjection
 if(APPLE)
     # Install directly into the bundle's Resources directory.
     # Note: DESTINATION is relative to CMAKE_INSTALL_PREFIX.
-    install(DIRECTORY assets DESTINATION ChurchProjection.app/Contents/Resources)
+    install(DIRECTORY assets/bible assets/default_themes DESTINATION ChurchProjection.app/Contents/Resources/assets PATTERN "*.bak" EXCLUDE PATTERN ".DS_Store" EXCLUDE)
 else()
-    install(DIRECTORY assets DESTINATION .)
+    install(DIRECTORY assets/bible assets/default_themes DESTINATION assets PATTERN "*.bak" EXCLUDE PATTERN ".DS_Store" EXCLUDE)
 endif()
 
 # 3. Deployment Logic (Qt Dependencies)
@@ -107,8 +107,12 @@ elseif(APPLE)
         install(CODE "
             message(STATUS \"Running macdeployqt...\")
             execute_process(
-                COMMAND \"${MACDEPLOYQT_EXE}\" \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\" -always-overwrite
+                COMMAND \"${MACDEPLOYQT_EXE}\" \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\" -always-overwrite -libpath=\"${Qt6_DIR}/../../../lib\"
+                RESULT_VARIABLE res
             )
+            if(NOT res EQUAL 0)
+                message(FATAL_ERROR \"macdeployqt failed: \${res}\")
+            endif()
         ")
     endif()
 endif()
@@ -123,12 +127,14 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE") # Optional: Creat
 
 if(WIN32)
     set(CPACK_GENERATOR "NSIS;ZIP")
-    set(CPACK_NSIS_MODIFY_PATH ON)
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+    set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
     set(CPACK_NSIS_DISPLAY_NAME "Church Projection")
     # set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/icon.ico") # enable if you have an icon
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop;ZIP")
     set(CPACK_DMG_VOLUME_NAME "ChurchProjection")
+    set(CPACK_DMG_FORMAT "ULMO")
     # set(CPACK_DMG_DS_STORE_SETUP_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/dmg_setup.scpt") # Optional - disabled as file missing
 else()
     set(CPACK_GENERATOR "TGZ;DEB")

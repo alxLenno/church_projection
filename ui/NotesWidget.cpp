@@ -12,6 +12,11 @@
 #include <QVBoxLayout>
 
 NotesWidget::NotesWidget(QWidget *parent) : QWidget(parent) {
+  aiLookup = new ScriptureLookup(this);
+  searchTimer = new QTimer(this);
+  searchTimer->setSingleShot(true);
+  searchTimer->setInterval(150);
+  connect(searchTimer, &QTimer::timeout, this, [this]() { performSearch(pendingQuery); });
   setupUI();
   connect(&BibleManager::instance(), &BibleManager::bibleLoaded, this,
           &NotesWidget::refreshVersions);
@@ -71,7 +76,7 @@ void NotesWidget::setupUI() {
   editor = new QTextEdit();
   editor->setPlaceholderText(
       "Type your notes here...\n\nUse @ to search for scriptures (e.g., @John "
-      "3:16 or @love). Results will appear on the right.");
+      "3:16 or @where Jesus calms the storm). Results will appear on the right.");
   editor->setStyleSheet(
       "QTextEdit { background: rgba(30, 41, 59, 0.6); border: 1px solid "
       "rgba(148, 163, 184, 0.2); border-radius: 8px; color: white; padding: "
@@ -118,26 +123,19 @@ void NotesWidget::setupUI() {
   mainLayout->addWidget(splitter);
 
   connect(editor, &QTextEdit::textChanged, this, &NotesWidget::onTextChanged);
+  connect(editor, &QTextEdit::cursorPositionChanged, this, &NotesWidget::onTextChanged);
 }
 
 void NotesWidget::onTextChanged() {
-  QString text = editor->toPlainText();
-  QTextCursor cursor = editor->textCursor();
-  int pos = cursor.position();
-
-  // Find last '@' before cursor
-  int atIndex = text.lastIndexOf('@', pos - 1);
-
-  if (atIndex != -1) {
-    QString query = text.mid(atIndex + 1, pos - atIndex - 1);
-    // Only trigger if query length is sufficient
-    if (query.length() >= 2) {
-      performSearch(query);
-      return;
-    }
-  }
-  // Optional: Clear results if '@' sequence is broken?
-  // deciding to keep them for persistence as requested
+  ++searchRevision;
+  searchTimer->stop();
+  aiLookup->cancel();
+  const auto cursor = editor->textCursor();
+  const QString text = cursor.block().text().left(cursor.positionInBlock());
+  const int at = text.lastIndexOf('@');
+  if (at < 0 || (at > 0 && !text[at - 1].isSpace())) return;
+  pendingQuery = text.mid(at + 1).trimmed();
+  if (pendingQuery.size() >= 2) searchTimer->start();
 }
 
 void NotesWidget::performSearch(const QString &query) {
@@ -152,7 +150,26 @@ void NotesWidget::performSearch(const QString &query) {
   }
 
   auto results = BibleManager::instance().search(query, version);
+  if (!results.empty()) {
+    showResults(results, version);
+    return;
+  }
+  resultsList->clear();
+  auto *loading = new QListWidgetItem("No local matches — finding scripture with AI…", resultsList);
+  loading->setFlags(Qt::NoItemFlags);
+  const int revision = searchRevision;
+  // Local results are fast; wait for a typing pause before sending to AI.
+  QTimer::singleShot(750, this, [this, query, version, revision]() {
+    if (revision != searchRevision) return;
+    aiLookup->search(query, version, [this, version, revision](std::vector<BibleVerse> verses, const QString &error) {
+      if (revision != searchRevision) return;
+      showResults(verses, version);
+      if (!error.isEmpty()) { auto *item = new QListWidgetItem(error, resultsList); item->setFlags(Qt::NoItemFlags); }
+    });
+  });
+}
 
+void NotesWidget::showResults(const std::vector<BibleVerse> &results, const QString &version) {
   resultsList->clear();
   for (const auto &verse : results) {
     // Localize book name
@@ -168,10 +185,11 @@ void NotesWidget::performSearch(const QString &query) {
     QListWidgetItem *item = new QListWidgetItem(label);
     // Store text to project
     item->setData(Qt::UserRole, verse.text);
-    item->setData(Qt::UserRole + 1, QString("%1 %2:%3")
+    item->setData(Qt::UserRole + 1, QString("%1 %2:%3 (%4)")
                                         .arg(displayBook)
                                         .arg(verse.chapter)
-                                        .arg(verse.verse));
+                                        .arg(verse.verse)
+                                        .arg(version));
     resultsList->addItem(item);
   }
 }

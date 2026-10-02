@@ -1,3 +1,4 @@
+#include "../core/SplitTextFit.h"
 #include "ProjectionPreview.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -5,7 +6,7 @@
 
 using namespace Projection;
 
-ProjectionPreview::ProjectionPreview(QWidget *parent) : QOpenGLWidget(parent) {
+ProjectionPreview::ProjectionPreview(QWidget *parent) : QWidget(parent) {
   setMinimumSize(320, 180); // Reduced for dashboard
 
   currentLayout = LayoutType::Single;
@@ -49,12 +50,27 @@ void ProjectionPreview::setupLayer(int idx) {
             }
           });
 
+  ls->contentPlayer = new QMediaPlayer(this);
+  ls->contentAudio = new QAudioOutput(this);
+  ls->contentAudio->setMuted(true);
+  ls->contentPlayer->setAudioOutput(ls->contentAudio);
+  ls->contentSink = new QVideoSink(this);
+  ls->contentPlayer->setVideoSink(ls->contentSink);
+  connect(ls->contentSink, &QVideoSink::videoFrameChanged, this, [this, ls](const QVideoFrame &frame) {
+    ls->contentFrame = frame; update();
+  });
   layers.push_back(ls);
 }
 
 void ProjectionPreview::setLayerText(int layerIdx, const QString &text) {
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
+  if (!text.isEmpty()) {
+    layers[layerIdx]->contentPlayer->stop();
+    layers[layerIdx]->contentFrame = QVideoFrame();
+    layers[layerIdx]->content.mediaType = Content::MediaType::None;
+    layers[layerIdx]->content.renderedMedia = QImage();
+  }
   layers[layerIdx]->content.text = text;
   update();
 }
@@ -98,6 +114,9 @@ void ProjectionPreview::clearLayer(int layerIdx) {
     return;
   LayerState *ls = layers[layerIdx];
 
+  ls->contentPlayer->stop();
+  ls->contentFrame = QVideoFrame();
+
   // Save formatting BEFORE reset (matches ProjectionWindow fix)
   auto savedFmt = ls->content.formatting;
 
@@ -123,6 +142,12 @@ void ProjectionPreview::setLayerMedia(int layerIdx,
     return;
 
   LayerState *ls = layers[layerIdx];
+  ls->contentPlayer->stop();
+  ls->contentFrame = QVideoFrame();
+  if (type == Content::MediaType::Video) {
+    ls->contentPlayer->setSource(QUrl::fromLocalFile(path));
+    ls->contentPlayer->play();
+  }
   ls->content.mediaType = type;
   ls->content.mediaPath = path;
   ls->content.pageNumber = page;
@@ -170,7 +195,7 @@ void ProjectionPreview::resizeEvent(QResizeEvent *event) {
     ls->content.cachedPixmap = QPixmap();
     ls->content.cachedPixmapSize = QSize();
   }
-  QOpenGLWidget::resizeEvent(event);
+  QWidget::resizeEvent(event);
 }
 
 void ProjectionPreview::paintEvent(QPaintEvent *event) {
@@ -181,6 +206,7 @@ void ProjectionPreview::paintEvent(QPaintEvent *event) {
 
   // Background Fill
   painter.fillRect(rect(), Qt::black);
+  if (blackout) return;
 
   if (currentLayout == LayoutType::Single) {
     drawContent(painter, 0, rect(), true);
@@ -210,12 +236,30 @@ void ProjectionPreview::paintEvent(QPaintEvent *event) {
     painter.drawLine(0, mid, width(), mid);
   }
 
+  if (currentLayout != LayoutType::Single) {
+    for (int i = 0; i < 2; ++i) {
+      QRect side = currentLayout == LayoutType::SplitVertical
+          ? QRect(i * width() / 2, 0, width() / 2, height())
+          : QRect(0, i * height() / 2, width(), height() / 2);
+      painter.setPen(QPen(i == activeScreen ? QColor("#38bdf8") : QColor("#64748b"), i == activeScreen ? 2 : 1));
+      painter.setBrush(Qt::NoBrush);
+      painter.drawRect(side.adjusted(2, 2, -2, -2));
+      QRect badge(side.left() + 6, side.top() + 6, 70, 20);
+      painter.fillRect(badge, QColor(15, 23, 42, 220));
+      painter.setPen(QColor("#e2e8f0"));
+      QFont labelFont = painter.font(); labelFont.setPixelSize(11); painter.setFont(labelFont);
+      painter.drawText(badge, Qt::AlignCenter, QString("Screen %1").arg(i + 1));
+    }
+  }
+
   // Border
   QPen pen(QColor("#334155"));
   pen.setWidth(2);
   painter.setPen(pen);
   painter.setBrush(Qt::NoBrush);
   painter.drawRect(rect().adjusted(1, 1, -1, -1));
+  Projection::drawStageOverlay(painter, this->rect(), currentLayout, stageOverlay, overlayClock.isValid() ? overlayClock.elapsed() : 0);
+
 }
 
 void ProjectionPreview::drawBackground(QPainter &painter, int idx,
@@ -231,7 +275,7 @@ void ProjectionPreview::drawBackground(QPainter &painter, int idx,
   if (ls->isVideoActive && c.videoFrame.isValid()) {
     QImage img = c.videoFrame.toImage();
     QSize scaledSize =
-        img.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
+        img.size().scaled(rect.size(), currentLayout == LayoutType::Single ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio);
     QRect targetRect(rect.center().x() - scaledSize.width() / 2,
                      rect.center().y() - scaledSize.height() / 2,
                      scaledSize.width(), scaledSize.height());
@@ -240,7 +284,7 @@ void ProjectionPreview::drawBackground(QPainter &painter, int idx,
     // Use cached scaled pixmap
     if (c.cachedPixmapSize != rect.size()) {
       QSize scaledSize =
-          c.pixmap.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
+          c.pixmap.size().scaled(rect.size(), currentLayout == LayoutType::Single ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio);
       c.cachedPixmap = c.pixmap.scaled(scaledSize, Qt::IgnoreAspectRatio,
                                        Qt::SmoothTransformation);
       c.cachedPixmapSize = rect.size();
@@ -257,14 +301,17 @@ void ProjectionPreview::drawBackground(QPainter &painter, int idx,
 }
 
 void ProjectionPreview::drawContent(QPainter &painter, int idx,
-                                    const QRect &rect, bool drawBg) {
+                                    const QRect &region, bool drawBg) {
   if (idx < 0 || idx >= (int)layers.size())
     return;
   LayerState *ls = layers[idx];
   Content &c = ls->content;
+  const QRect rect = Projection::stageContentRect(region, this->rect(), currentLayout, stageOverlay);
+  painter.save();
+  painter.setClipRect(rect);
 
   if (drawBg) {
-    drawBackground(painter, idx, rect);
+    drawBackground(painter, idx, region);
   }
 
   // Draw Media
@@ -287,9 +334,19 @@ void ProjectionPreview::drawContent(QPainter &painter, int idx,
     }
   }
 
-  if (!c.text.isEmpty()) {
+  if (c.mediaType == Content::MediaType::Video && ls->contentFrame.isValid()) {
+    const QImage frame = ls->contentFrame.toImage();
+    if (!frame.isNull()) {
+      painter.fillRect(rect, Qt::black);
+      const QSize size = frame.size().scaled(rect.size(), Qt::KeepAspectRatio);
+      painter.drawImage(QRect(QPoint(rect.center().x()-size.width()/2, rect.center().y()-size.height()/2), size), frame);
+    }
+  }
+
+  if (textVisible && !c.text.isEmpty()) {
     drawText(painter, c, rect, ls->scrollOffset);
   }
+  painter.restore();
 }
 
 // Helper: Draw text with shadow and outline for readability (scaled for
@@ -345,7 +402,32 @@ void ProjectionPreview::drawText(QPainter &painter,
   option.setWrapMode(QTextOption::WordWrap);
 
   int fontSize = fmt.fontSize;
-  if (fontSize <= 0) {
+  if (currentLayout != LayoutType::Single) {
+    const bool preserveLines = preserveSplitLines(text);
+    option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
+    // Fit both text blocks, then use the smaller result on both screens.
+    // Recomputed on every render so either side's edits resize the pair.
+    fontSize = 10000;
+    for (int i = 0; i < 2 && i < static_cast<int>(layers.size()); ++i) {
+      const Content &other = layers[i]->content;
+      if (other.text.isEmpty()) continue;
+      QRect area;
+      if (currentLayout == LayoutType::SplitVertical) {
+        const int mid = width() / 2;
+        area = QRect(i == 0 ? 0 : mid, 0, i == 0 ? mid : width() - mid, height());
+      } else {
+        const int mid = height() / 2;
+        area = QRect(0, i == 0 ? 0 : mid, width(), i == 0 ? mid : height() - mid);
+      }
+      area = Projection::stageContentRect(area, this->rect(), currentLayout, stageOverlay);
+      const int margin = qMax(2, qRound(other.formatting.margin * area.height() / 1080.0));
+      const QSize available(qMax(1, area.width() - 2 * margin), qMax(1, area.height() - 2 * margin));
+      const int cap = qMax(1, qRound(150 * area.height() / 1080.0));
+      fontSize = qMin(fontSize, fitSplitText(other.text, other.formatting.fontFamily, available,
+                       cap, other.formatting.isScrolling, preserveSplitLines(other.text)));
+    }
+    if (fontSize == 10000) fontSize = 1;
+  } else if (fontSize <= 0) {
     if (fmt.isScrolling) {
       int targetLines = 8;
       int targetSize = rect.height() / targetLines;
@@ -438,4 +520,12 @@ void ProjectionPreview::drawText(QPainter &painter,
     drawStyledTextPreview(painter, QRectF(textRect), text, option, fmt,
                           scaleFactor);
   }
+}
+
+void ProjectionPreview::controlLayerVideo(int layer, int action) {
+  if (layer < 0 || layer >= static_cast<int>(layers.size())) return;
+  auto *player = layers[layer]->contentPlayer;
+  if (action == 0) player->play();
+  else if (action == 1) player->pause();
+  else player->stop();
 }

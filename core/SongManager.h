@@ -10,6 +10,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <vector>
+#include <algorithm>
 
 class SongManager : public QObject {
   Q_OBJECT
@@ -44,6 +45,8 @@ public:
       QJsonObject obj;
       obj["title"] = song.title;
       obj["artist"] = song.artist;
+      obj["pinned"] = song.isPinned();
+      obj["lastUsed"] = QString::number(song.lastUsed);
       obj["verses"] = QJsonArray::fromStringList(song.verses);
       array.append(obj);
     }
@@ -79,6 +82,8 @@ public:
       Song s;
       s.title = obj["title"].toString();
       s.artist = obj["artist"].toString();
+      s.pinned = obj["pinned"].toBool();
+      s.lastUsed = obj["lastUsed"].toString().toLongLong();
       QJsonArray verseArray = obj["verses"].toArray();
       for (int v = 0; v < verseArray.size(); ++v) {
         s.verses << verseArray[v].toString();
@@ -95,6 +100,28 @@ public:
   }
 
   const std::vector<Song> &getSongs() const { return songs; }
+  void removeFromRecents(int index) {
+    if (index < 0 || index >= static_cast<int>(songs.size())) return;
+    songs[index].lastUsed = 0;
+    saveSongs();
+  }
+  void markUsed(int index) {
+    if (index < 0 || index >= static_cast<int>(songs.size()) || songs[index].isCommonItem()) return;
+    qint64 latest = 0;
+    for (const auto &song : songs) latest = std::max(latest, song.lastUsed);
+    songs[index].lastUsed = latest + 1;
+    saveSongs();
+  }
+  std::vector<int> recentSongIndices() const {
+    std::vector<int> indices;
+    for (int i = 0; i < static_cast<int>(songs.size()); ++i)
+      if (songs[i].lastUsed > 0 && !songs[i].isCommonItem()) indices.push_back(i);
+    std::stable_sort(indices.begin(), indices.end(), [this](int a, int b) {
+      return songs[a].lastUsed > songs[b].lastUsed;
+    });
+    if (indices.size() > 5) indices.resize(5);
+    return indices;
+  }
   void addSong(const Song &song) {
     songs.push_back(song);
     saveSongs();

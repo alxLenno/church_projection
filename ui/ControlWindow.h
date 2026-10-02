@@ -29,6 +29,14 @@
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QVBoxLayout>
+#include <QWebEngineView>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QStringListModel>
+#include <QCompleter>
+#include <QTimer>
 
 class VerseWidget : public QWidget {
   Q_OBJECT
@@ -114,9 +122,19 @@ private:
   QWidget *sidebarContainer;
   QTabWidget *mainTabWidget;
 
-  // Sidebar (Library)
+  // Sidebar (Library) — compact, lazily-populated song list
   QLineEdit *songSearchEdit;
   QListWidget *songList;
+  QLabel *songListStatusLabel;
+  QList<int> m_filteredSongIndices; // indices into songManager->getSongs()
+  int m_songListLoaded = 0;         // how many filtered results are in songList
+  QTimer *m_songSearchDebounce = nullptr;
+  static constexpr int kSongPageSize = 30;
+
+  void filterSongList(const QString &query);
+  void loadMoreSongs();
+  void selectSongByIndex(int songIndex);
+  void updateSongListStatus();
 
   // Central (Workspace)
   // -- Bible Tab --
@@ -124,7 +142,7 @@ private:
   QListWidget *bibleVerseList;
   QLineEdit *bibleQuickSearch;
   QButtonGroup *bibleVersionButtons;
-  QHBoxLayout *bibleVersionLayout;
+  QGridLayout *bibleVersionLayout;
   QString currentBibleVersion;
 
   // Grid Navigation
@@ -145,6 +163,8 @@ private:
   QComboBox *targetLayerCombo;
   QComboBox *screenSelectorCombo; // New: screen selector
   int currentTargetLayer = 0;
+  bool chooseContentScreen();
+  QString m_screenText[2];
 
   // Text Formatting Controls
   QSpinBox *fontSizeSpin;
@@ -167,6 +187,12 @@ private:
   int currentBibleChapter = 1;
 
   // -- Song Tab --
+  QListWidget *m_songMatches = nullptr;
+  QPushButton *m_pinSongBtn = nullptr;
+  QTimer *m_songLookupTimer = nullptr;
+  void searchSongLibrary();
+  void findSongMatches(const QString &query);
+  void openSongBrowser(const QString &query);
   QListWidget *verseList;
   QLineEdit *titleEdit;
   QLineEdit *artistEdit;
@@ -201,6 +227,50 @@ private:
   // Notes
   NotesWidget *notesWidget;
 
+  // -- Browser Tab --
+  QLineEdit *m_lyricsSearch;
+  QWebEngineView *m_webView;
+  QLabel *m_browserStatus;
+  QCompleter *m_lyricsCompleter;
+  QNetworkAccessManager *m_netManager;
+  QStringListModel *m_suggestModel;
+  QTimer *m_suggestTimer;
+
+  // -- Browser Tab: Local Bible Lookup Panel --
+  QButtonGroup *m_bibleVersionBtns;
+  QString m_selectedBibleVersion;
+  class ScriptureLookup *m_scriptureLookup = nullptr;
+  QLineEdit *m_bibleSearchInput;
+  QTimer *m_bibleSearchTimer;
+  QListWidget *m_bibleResultsList;
+
+  // -- Browser Tab: AI-powered lyrics cleanup --
+  // Cascades through free/cheap options before falling back to local
+  // regex-based cleanup: your own Groq key (free) -> your bible_trivia
+  // backend (free, no key needed) -> Anthropic (paid, if a key is set) ->
+  // heuristicCleanLyrics (always available, no network).
+  QPushButton *m_addToSongsBtn = nullptr;
+  void cleanLyricsWithAI(const QString &rawText, const QString &title,
+                         const QString &artist);
+  void tryGroqCleanup(const QString &prompt, const QString &rawText,
+                      const QString &title, const QString &artist);
+  void tryBibleTriviaBackendCleanup(const QString &prompt,
+                                    const QString &rawText,
+                                    const QString &title,
+                                    const QString &artist);
+  void tryAnthropicCleanup(const QString &prompt, const QString &rawText,
+                           const QString &title, const QString &artist);
+  void finishLyricsCleanup(const QString &title, const QString &artist,
+                           const QString &cleanedText,
+                           const QString &sourceLabel);
+  void finishWithHeuristicCleanup(const QString &rawText,
+                                  const QString &title,
+                                  const QString &artist);
+  QString heuristicCleanLyrics(const QString &pageText);
+  void showImportLyricsDialog(const QString &title, const QString &artist,
+                              const QString &lyricsText, bool aiCleaned);
+  void promptForAiApiKeys();
+
   // Themes
   QGroupBox *videoThemesGroup;
   QGridLayout *videoThemesLayout;
@@ -213,6 +283,8 @@ private:
   void setupMasterControl(QWidget *container);
   void setupBibleTab(QWidget *container);
   void setupSongTab(QWidget *container);
+  void setupLyricsTab(QWidget *container);
+  void setupBrowserTab(QWidget *container);
 
   // Bible Grid Helpers
   void setupBookGrid(QWidget *page);

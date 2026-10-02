@@ -1,3 +1,4 @@
+#include "../core/SplitTextFit.h"
 #include "ProjectionWindow.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -8,6 +9,11 @@ using namespace Projection;
 ProjectionWindow::ProjectionWindow(QWidget *parent) : QOpenGLWidget(parent) {
   setWindowFlag(Qt::FramelessWindowHint);
   resize(1920, 1080);
+  // Stays hidden until togglePresentation() explicitly geometries and shows
+  // it on the target screen — but its native window handle exists from
+  // startup (main.cpp forces that), so keep it off the visible desktop in
+  // the meantime rather than overlapping the dashboard at the default (0,0).
+  move(-10000, -10000);
 
   // Start with black screen to avoid white flash
   setAttribute(Qt::WA_OpaquePaintEvent);
@@ -56,12 +62,28 @@ void ProjectionWindow::setupLayer(int idx) {
   connect(ls->mediaPlayer, &QMediaPlayer::errorOccurred, this,
           [this, idx]() { handleMediaPlayerError(idx); });
 
+  ls->contentPlayer = new QMediaPlayer(this);
+  ls->contentAudio = new QAudioOutput(this);
+  ls->contentAudio->setMuted(true);
+  ls->contentPlayer->setAudioOutput(ls->contentAudio);
+  ls->contentSink = new QVideoSink(this);
+  ls->contentPlayer->setVideoSink(ls->contentSink);
+  connect(ls->contentSink, &QVideoSink::videoFrameChanged, this, [this, ls](const QVideoFrame &frame) {
+    ls->contentFrame = frame; update();
+  });
+  connect(ls->contentPlayer, &QMediaPlayer::errorOccurred, this, [this, ls]() { emit mediaError(ls->contentPlayer->errorString()); });
   layers.push_back(ls);
 }
 
 void ProjectionWindow::setLayerText(int layerIdx, const QString &text) {
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
+  if (!text.isEmpty()) {
+    layers[layerIdx]->contentPlayer->stop();
+    layers[layerIdx]->contentFrame = QVideoFrame();
+    layers[layerIdx]->content.mediaType = Content::MediaType::None;
+    layers[layerIdx]->content.renderedMedia = QImage();
+  }
   layers[layerIdx]->content.text = text;
   update();
 }
@@ -128,6 +150,12 @@ void ProjectionWindow::setLayerMedia(int layerIdx,
     return;
 
   LayerState *ls = layers[layerIdx];
+  ls->contentPlayer->stop();
+  ls->contentFrame = QVideoFrame();
+  if (type == Content::MediaType::Video) {
+    ls->contentPlayer->setSource(QUrl::fromLocalFile(path));
+    ls->contentPlayer->play();
+  }
   ls->content.mediaType = type;
   ls->content.mediaPath = path;
   ls->content.pageNumber = page;
@@ -149,6 +177,9 @@ void ProjectionWindow::clearLayer(int layerIdx) {
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   LayerState *ls = layers[layerIdx];
+
+  ls->contentPlayer->stop();
+  ls->contentFrame = QVideoFrame();
 
   // Save formatting BEFORE reset
   auto savedFmt = ls->content.formatting;
@@ -202,6 +233,7 @@ void ProjectionWindow::paintEvent(QPaintEvent *event) {
 
   // Always fill with black first
   painter.fillRect(rect(), Qt::black);
+  if (blackout) return;
 
   if (currentLayout == LayoutType::Single) {
     // Standard Single Layer
@@ -234,6 +266,8 @@ void ProjectionWindow::paintEvent(QPaintEvent *event) {
     painter.setPen(QPen(QColor(255, 255, 255, 100), 2));
     painter.drawLine(0, mid, width(), mid);
   }
+  Projection::drawStageOverlay(painter, this->rect(), currentLayout, stageOverlay, overlayClock.isValid() ? overlayClock.elapsed() : 0);
+
 }
 
 void ProjectionWindow::drawBackground(QPainter &painter, int idx,
@@ -249,7 +283,7 @@ void ProjectionWindow::drawBackground(QPainter &painter, int idx,
   if (ls->isVideoActive && c.videoFrame.isValid()) {
     QImage img = c.videoFrame.toImage();
     QSize scaledSize =
-        img.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
+        img.size().scaled(rect.size(), currentLayout == LayoutType::Single ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio);
     QRect targetRect(rect.center().x() - scaledSize.width() / 2,
                      rect.center().y() - scaledSize.height() / 2,
                      scaledSize.width(), scaledSize.height());
@@ -258,7 +292,7 @@ void ProjectionWindow::drawBackground(QPainter &painter, int idx,
     // Use cached scaled pixmap for performance
     if (c.cachedPixmapSize != rect.size()) {
       QSize scaledSize =
-          c.pixmap.size().scaled(rect.size(), Qt::KeepAspectRatioByExpanding);
+          c.pixmap.size().scaled(rect.size(), currentLayout == LayoutType::Single ? Qt::KeepAspectRatioByExpanding : Qt::KeepAspectRatio);
       c.cachedPixmap = c.pixmap.scaled(scaledSize, Qt::IgnoreAspectRatio,
                                        Qt::SmoothTransformation);
       c.cachedPixmapSize = rect.size();
@@ -275,15 +309,18 @@ void ProjectionWindow::drawBackground(QPainter &painter, int idx,
 }
 
 void ProjectionWindow::drawContent(QPainter &painter, int idx,
-                                   const QRect &rect, bool drawBg) {
+                                   const QRect &region, bool drawBg) {
   if (idx < 0 || idx >= (int)layers.size())
     return;
   LayerState *ls = layers[idx];
   Content &c = ls->content;
+  const QRect rect = Projection::stageContentRect(region, this->rect(), currentLayout, stageOverlay);
+  painter.save();
+  painter.setClipRect(rect);
 
   // 1. Draw Background (Optional)
   if (drawBg) {
-    drawBackground(painter, idx, rect);
+    drawBackground(painter, idx, region);
   }
 
   // 1.5 Draw Media (Image/PDF)
@@ -301,10 +338,20 @@ void ProjectionWindow::drawContent(QPainter &painter, int idx,
     }
   }
 
+  if (c.mediaType == Content::MediaType::Video && ls->contentFrame.isValid()) {
+    const QImage frame = ls->contentFrame.toImage();
+    if (!frame.isNull()) {
+      painter.fillRect(rect, Qt::black);
+      const QSize size = frame.size().scaled(rect.size(), Qt::KeepAspectRatio);
+      painter.drawImage(QRect(QPoint(rect.center().x()-size.width()/2, rect.center().y()-size.height()/2), size), frame);
+    }
+  }
+
   // 2. Draw Text (on top)
-  if (!c.text.isEmpty()) {
+  if (textVisible && !c.text.isEmpty()) {
     drawText(painter, c, rect, ls->scrollOffset);
   }
+  painter.restore();
 }
 
 // Helper: Draw text with shadow and outline for readability
@@ -354,7 +401,32 @@ void ProjectionWindow::drawText(QPainter &painter, const Content &content,
   int fontSize = fmt.fontSize;
 
   // Auto-fit logic if fontSize is 0
-  if (fontSize <= 0) {
+  if (currentLayout != LayoutType::Single) {
+    const bool preserveLines = preserveSplitLines(text);
+    option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
+    // Fit both text blocks, then use the smaller result on both screens.
+    // Recomputed on every render so either side's edits resize the pair.
+    fontSize = 10000;
+    for (int i = 0; i < 2 && i < static_cast<int>(layers.size()); ++i) {
+      const Content &other = layers[i]->content;
+      if (other.text.isEmpty()) continue;
+      QRect area;
+      if (currentLayout == LayoutType::SplitVertical) {
+        const int mid = width() / 2;
+        area = QRect(i == 0 ? 0 : mid, 0, i == 0 ? mid : width() - mid, height());
+      } else {
+        const int mid = height() / 2;
+        area = QRect(0, i == 0 ? 0 : mid, width(), i == 0 ? mid : height() - mid);
+      }
+      area = Projection::stageContentRect(area, this->rect(), currentLayout, stageOverlay);
+      const int margin = other.formatting.margin;
+      const QSize available(qMax(1, area.width() - 2 * margin), qMax(1, area.height() - 2 * margin));
+      const int cap = qMax(1, qRound(150 * area.height() / 1080.0));
+      fontSize = qMin(fontSize, fitSplitText(other.text, other.formatting.fontFamily, available,
+                       cap, other.formatting.isScrolling, preserveSplitLines(other.text)));
+    }
+    if (fontSize == 10000) fontSize = 1;
+  } else if (fontSize <= 0) {
     fontSize = 150; // Cap at 150px absolute max
 
     if (fmt.isScrolling) {
@@ -477,4 +549,25 @@ void ProjectionWindow::handleMediaPlayerError(int layerIdx) {
   QString errorMsg = layers[layerIdx]->mediaPlayer->errorString();
   qWarning() << "Media player error on layer" << layerIdx << ":" << errorMsg;
   emit mediaError(QString("Layer %1 Error: %2").arg(layerIdx).arg(errorMsg));
+}
+
+void ProjectionWindow::controlLayerVideo(int layer, int action) {
+  if (layer < 0 || layer >= static_cast<int>(layers.size())) return;
+  auto *player = layers[layer]->contentPlayer;
+  if (action == 0) player->play();
+  else if (action == 1) player->pause();
+  else player->stop();
+}
+
+void ProjectionWindow::setLayerVideoAudio(int layer, bool muted, float volume) {
+  if (layer < 0 || layer >= static_cast<int>(layers.size())) return;
+  layers[layer]->contentAudio->setVolume(qBound(0.0f, volume, 1.0f));
+  layers[layer]->contentAudio->setMuted(muted);
+}
+
+bool ProjectionWindow::layerVideoMuted(int layer) const {
+  return layer < 0 || layer >= static_cast<int>(layers.size()) || layers[layer]->contentAudio->isMuted();
+}
+float ProjectionWindow::layerVideoVolume(int layer) const {
+  return layer < 0 || layer >= static_cast<int>(layers.size()) ? 1.0f : layers[layer]->contentAudio->volume();
 }

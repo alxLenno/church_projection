@@ -33,7 +33,7 @@ struct Content {
   QSize cachedPixmapSize;
 
   // Media Support
-  enum class MediaType { None, Image, Pdf };
+  enum class MediaType { None, Image, Pdf, Video };
   MediaType mediaType = MediaType::None;
   QString mediaPath;
   int pageNumber = 0;      // For PDF

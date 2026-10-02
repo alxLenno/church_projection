@@ -1,5 +1,6 @@
 #pragma once
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -164,8 +165,13 @@ private:
   }
 
   void loadDefaultThemes() {
-    QString assetPath =
-        QString("%1/assets/default_themes").arg(CHURCH_PROJECTION_SOURCE_DIR);
+    QString assetPath;
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QStringList candidates{appDir + "/assets/default_themes", appDir + "/../assets/default_themes", appDir + "/../Resources/assets/default_themes"};
+#ifdef CHURCH_PROJECTION_SOURCE_DIR
+    candidates << QString(CHURCH_PROJECTION_SOURCE_DIR) + "/assets/default_themes";
+#endif
+    for (const auto &candidate : candidates) if (QDir(candidate).exists()) { assetPath = candidate; break; }
     QDir dir(assetPath);
     if (!dir.exists()) {
       qWarning() << "Default themes directory not found at:" << assetPath;

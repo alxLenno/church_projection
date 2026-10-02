@@ -14,13 +14,25 @@
 
 #include "../core/ProjectionContent.h"
 #include <vector>
+#include "../core/StageOverlay.h"
+#include <QElapsedTimer>
 
 class ProjectionWindow : public QOpenGLWidget {
   Q_OBJECT
 public:
+  void setStageOverlay(const Projection::StageOverlay &value) {
+    if (!overlayClock.isValid() || value.text != stageOverlay.text || value.scrolling != stageOverlay.scrolling) overlayClock.restart();
+    stageOverlay = value; update();
+  }
+  void setBlackout(bool hidden) { blackout = hidden; update(); }
+  void setTextVisible(bool visible) { textVisible = visible; update(); }
   explicit ProjectionWindow(QWidget *parent = nullptr);
 
   // New multi-layer API
+  bool layerVideoMuted(int layer) const;
+  float layerVideoVolume(int layer) const;
+  void setLayerVideoAudio(int layer, bool muted, float volume);
+  void controlLayerVideo(int layer, int action); // 0 play, 1 pause, 2 stop
   void setLayerText(int layerIdx, const QString &text);
   void setLayerFormatting(int layerIdx, const Projection::TextFormatting &fmt);
   Projection::TextFormatting
@@ -53,7 +65,15 @@ private slots:
   void onVideoFrameChanged(int layerIdx, const QVideoFrame &frame);
 
 private:
+  Projection::StageOverlay stageOverlay;
+  QElapsedTimer overlayClock;
+  bool blackout = false;
+  bool textVisible = true;
   struct LayerState {
+    QMediaPlayer *contentPlayer = nullptr;
+    QAudioOutput *contentAudio = nullptr;
+    QVideoSink *contentSink = nullptr;
+    QVideoFrame contentFrame;
     QMediaPlayer *mediaPlayer = nullptr;
     QAudioOutput *audioOutput = nullptr;
     QVideoSink *videoSink = nullptr;

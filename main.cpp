@@ -53,9 +53,13 @@ int main(int argc, char *argv[]) {
   SongManager songManager;
   ThemeManager themeManager;
 
-  // Create the projection window first
+  // Create the projection window, but keep it hidden until the operator
+  // clicks "GO LIVE" (ControlWindow::togglePresentation shows/positions it
+  // on the target screen then). Force the native window handle to exist now
+  // — without this, projection->windowHandle() would be null the first time
+  // togglePresentation calls setScreen() on it.
   ProjectionWindow pw;
-  pw.show();
+  pw.winId();
 
   // Pass the pointer to the control window and song manager
   ControlWindow cw(&pw, &songManager, &themeManager);
