@@ -147,6 +147,7 @@ elseif(APPLE)
 endif()
 
 # 4. CPack Configuration
+set(CPACK_VERBATIM_VARIABLES ON)
 set(CPACK_PACKAGE_NAME "ChurchProjection")
 set(CPACK_PACKAGE_VENDOR "LennoxKK")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Church Projection System")
@@ -161,9 +162,19 @@ if(WIN32)
     set(CPACK_NSIS_DISPLAY_NAME "Church Projection")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
-    set(CPACK_PACKAGE_EXECUTABLES "ChurchProjection;Church Projection")
+    # Explicit shortcuts are independent of the optional NSIS menu page.
+    set(CPACK_PACKAGE_EXECUTABLES "")
     set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
-    set(CPACK_CREATE_DESKTOP_LINKS "ChurchProjection")
+    set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS [=[
+      CreateDirectory "$SMPROGRAMS\ChurchProjection"
+      CreateShortCut "$SMPROGRAMS\ChurchProjection\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+      CreateShortCut "$DESKTOP\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+    ]=])
+    set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS [=[
+      Delete "$SMPROGRAMS\ChurchProjection\ChurchProjection.lnk"
+      Delete "$DESKTOP\ChurchProjection.lnk"
+      RMDir "$SMPROGRAMS\ChurchProjection"
+    ]=])
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop;ZIP")
     set(CPACK_DMG_VOLUME_NAME "ChurchProjection")
