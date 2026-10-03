@@ -2180,7 +2180,7 @@ bool ControlWindow::chooseContentScreen() {
   QMessageBox chooser(this);
   // Use the themed Qt card rather than a native Windows message box.
   // Prepare its background and layout before the native window is shown.
-  chooser.setOption(QMessageBox::DontUseNativeDialog, true);
+  chooser.setOption(QMessageBox::Option::DontUseNativeDialog, true);
   chooser.setAutoFillBackground(true);
   QPalette chooserPalette = chooser.palette();
   chooserPalette.setColor(QPalette::Window, QColor("#0f172a"));
