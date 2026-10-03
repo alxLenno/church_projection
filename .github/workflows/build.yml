@@ -12,6 +12,9 @@ on:
   pull_request:
     branches: [ "main", "master" ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
@@ -69,6 +72,15 @@ jobs:
     - name: Package
       working-directory: build
       run: cpack -C MinSizeRel --verbose
+
+    - name: Publish corrected Windows installer
+      if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.windows_only
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        Copy-Item build/ChurchProjection-1.1.0-win64.exe build/ChurchProjection-Windows-x64-icon-fixed.exe
+        python scripts/check-windows-icon.py build/ChurchProjection-Windows-x64-icon-fixed.exe
+        gh release upload mac-launch-fix-20261003 build/ChurchProjection-Windows-x64-icon-fixed.exe --repo $env:GITHUB_REPOSITORY --clobber
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
