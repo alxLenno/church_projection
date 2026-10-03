@@ -19,13 +19,19 @@ for binary in contents.rglob('*'):
     deps = subprocess.check_output(['otool', '-L', str(binary)], text=True).splitlines()[1:]
     for line in deps:
         dep = line.strip().split(' (')[0]
-        if dep in own_ids or not dep.startswith(('/opt/', '/Users/')):
+        if dep in own_ids or not dep.startswith(('/opt/', '/Users/', '@rpath/')):
             continue
-        if '.framework/' in dep:
+        if dep.startswith('@rpath/'):
+            target = frameworks / dep[len('@rpath/'):]
+        elif '.framework/' in dep:
             name, suffix = dep.split('.framework/', 1)
             target = frameworks / (Path(name).name + '.framework') / suffix
         else:
             target = frameworks / Path(dep).name
+        if not target.exists() and binary.name == 'libqtposition_nmea.dylib':
+            # Optional serial GPS plugin is unused by this desktop app.
+            binary.unlink()
+            break
         if not target.exists():
             raise RuntimeError(f'Missing bundled dependency: {binary}: {dep}')
         relative = '@loader_path/' + os.path.relpath(target, binary.parent)

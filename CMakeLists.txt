@@ -43,6 +43,13 @@ add_executable(ChurchProjection WIN32 MACOSX_BUNDLE
     ui/NotesWidget.h
 )
 
+set_target_properties(ChurchProjection PROPERTIES
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.lennoxkk.ChurchProjection"
+    MACOSX_BUNDLE_BUNDLE_NAME "ChurchProjection"
+    MACOSX_BUNDLE_BUNDLE_VERSION "1.1.0"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.1.0"
+)
+
 # Link Qt
 target_link_libraries(ChurchProjection Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets Qt6::OpenGLWidgets Qt6::WebEngineWidgets Qt6::Network)
 
@@ -102,6 +109,7 @@ if(WIN32)
         ")
     endif()
 elseif(APPLE)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
     find_program(MACDEPLOYQT_EXE macdeployqt HINTS ${Qt6_DIR}/../../../bin)
     if(MACDEPLOYQT_EXE)
         install(CODE "
@@ -112,6 +120,20 @@ elseif(APPLE)
             )
             if(NOT res EQUAL 0)
                 message(FATAL_ERROR \"macdeployqt failed: \${res}\")
+            endif()
+            execute_process(
+                COMMAND \"${Python3_EXECUTABLE}\" \"${CMAKE_SOURCE_DIR}/scripts/fix-macos-dependencies.py\" \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\"
+                RESULT_VARIABLE repair_result
+            )
+            if(NOT repair_result EQUAL 0)
+                message(FATAL_ERROR \"Mac runtime dependency repair failed\")
+            endif()
+            execute_process(
+                COMMAND /usr/bin/codesign --force --deep --sign - \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\"
+                RESULT_VARIABLE sign_result
+            )
+            if(NOT sign_result EQUAL 0)
+                message(FATAL_ERROR \"Mac app signing failed\")
             endif()
         ")
     endif()
