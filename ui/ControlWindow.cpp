@@ -2178,12 +2178,29 @@ bool ControlWindow::chooseContentScreen() {
     return true;
   }
   QMessageBox chooser(this);
+  // Use the themed Qt card rather than a native Windows message box.
+  // Prepare its background and layout before the native window is shown.
+  chooser.setOption(QMessageBox::DontUseNativeDialog, true);
+  chooser.setAutoFillBackground(true);
+  QPalette chooserPalette = chooser.palette();
+  chooserPalette.setColor(QPalette::Window, QColor("#0f172a"));
+  chooserPalette.setColor(QPalette::WindowText, QColor("#e2e8f0"));
+  chooser.setPalette(chooserPalette);
+  chooser.setStyleSheet(
+      "QMessageBox { background-color: #0f172a; color: #e2e8f0; }"
+      "QLabel { color: #e2e8f0; background: transparent; }"
+      "QPushButton { background: #334155; color: #f8fafc; border: none;"
+      " border-radius: 6px; padding: 10px 20px; min-width: 80px; }"
+      "QPushButton:hover { background: #155e75; }"
+      "QPushButton:focus { border: 1px solid #38bdf8; }");
   chooser.setWindowTitle("Choose projection screen");
   chooser.setText("Where should this content appear?");
   chooser.setInformativeText(type == Projection::LayoutType::SplitVertical ? "Screen 1: left · Screen 2: right" : "Screen 1: top · Screen 2: bottom");
   auto *one = chooser.addButton("Screen 1", QMessageBox::AcceptRole);
   auto *two = chooser.addButton("Screen 2", QMessageBox::AcceptRole);
   chooser.addButton(QMessageBox::Cancel);
+  chooser.ensurePolished();
+  chooser.adjustSize();
   chooser.exec();
   if (chooser.clickedButton() != one && chooser.clickedButton() != two) return false;
   currentTargetLayer = chooser.clickedButton() == one ? 0 : 1;

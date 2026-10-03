@@ -86,9 +86,9 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        Copy-Item build/ChurchProjection-1.2.1-win64.exe build/ChurchProjection-1.2.1-Windows-x64-Setup.exe
-        python scripts/check-windows-icon.py build/ChurchProjection-1.2.1-Windows-x64-Setup.exe
-        gh release upload v1.2.1 build/ChurchProjection-1.2.1-Windows-x64-Setup.exe --repo $env:GITHUB_REPOSITORY
+        Copy-Item build/ChurchProjection-1.2.2-win64.exe build/ChurchProjection-1.2.2-Windows-x64-Setup.exe
+        python scripts/check-windows-icon.py build/ChurchProjection-1.2.2-Windows-x64-Setup.exe
+        gh release upload v1.2.2 build/ChurchProjection-1.2.2-Windows-x64-Setup.exe --repo $env:GITHUB_REPOSITORY
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
