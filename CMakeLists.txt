@@ -24,6 +24,7 @@ set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION
 add_executable(ChurchProjection WIN32 MACOSX_BUNDLE
     ${APP_ICON_MACOS}
     main.cpp
+    resources.qrc
     core/Song.h
     core/SongManager.h
     core/ThemeManager.h
@@ -49,6 +50,12 @@ set_target_properties(ChurchProjection PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION "1.1.0"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "1.1.0"
 )
+
+if(WIN32)
+    enable_language(RC)
+    configure_file(assets/windows.rc.in "${CMAKE_CURRENT_BINARY_DIR}/windows.rc" @ONLY)
+    target_sources(ChurchProjection PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
+endif()
 
 # Link Qt
 target_link_libraries(ChurchProjection Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets Qt6::OpenGLWidgets Qt6::WebEngineWidgets Qt6::Network)
@@ -152,7 +159,11 @@ if(WIN32)
     set(CPACK_NSIS_MODIFY_PATH OFF)
     set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
     set(CPACK_NSIS_DISPLAY_NAME "Church Projection")
-    # set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/icon.ico") # enable if you have an icon
+    set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
+    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
+    set(CPACK_PACKAGE_EXECUTABLES "ChurchProjection;Church Projection")
+    set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
+    set(CPACK_CREATE_DESKTOP_LINKS "ChurchProjection")
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop;ZIP")
     set(CPACK_DMG_VOLUME_NAME "ChurchProjection")

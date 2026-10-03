@@ -3,6 +3,7 @@
 #include "ui/ControlWindow.h"
 #include "ui/ProjectionWindow.h"
 #include <QApplication>
+#include <QIcon>
 #include <QMessageBox>
 #include <QScreen>
 #include <QWindow>
@@ -33,6 +34,7 @@ private:
 
 int main(int argc, char *argv[]) {
   ChurchApp app(argc, argv);
+  app.setWindowIcon(QIcon(":/app-icon.png"));
 
   // App metadata for QSettings consistency
   app.setApplicationName("ChurchProjection");

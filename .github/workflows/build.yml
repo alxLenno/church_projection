@@ -2,6 +2,11 @@ name: Build and Package
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_only:
+        description: Build only the Windows installer
+        type: boolean
+        default: false
   push:
     branches: [ "main", "master" ]
   pull_request:
@@ -14,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: ${{ fromJSON(inputs.windows_only && '["windows-latest"]' || '["windows-latest", "macos-latest"]') }}
 
     steps:
     - uses: actions/checkout@v4
@@ -56,6 +61,10 @@ jobs:
 
     - name: Build
       run: cmake --build build --config MinSizeRel --parallel
+
+    - name: Verify Windows executable icon
+      if: runner.os == 'Windows'
+      run: python scripts/check-windows-icon.py build/MinSizeRel/ChurchProjection.exe
 
     - name: Package
       working-directory: build
