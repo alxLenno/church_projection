@@ -35,6 +35,7 @@
 #include <QStackedLayout>
 #include <QStandardItemModel>
 #include <QStyle>
+#include <QStyledItemDelegate>
 #include <QVideoSink>
 #include <QVideoWidget>
 #include <QWebEngineLoadingInfo>
@@ -372,10 +373,24 @@ private:
   QStackedLayout *m_stack = nullptr;
 };
 
+// Keep keyboard focus and selection while omitting the native Windows
+// focus frame; the selected card already provides the visual indication.
+class LyricCardDelegate : public QStyledItemDelegate {
+public:
+  using QStyledItemDelegate::QStyledItemDelegate;
+protected:
+  void initStyleOption(QStyleOptionViewItem *option,
+                       const QModelIndex &index) const override {
+    QStyledItemDelegate::initStyleOption(option, index);
+    option->state &= ~QStyle::State_HasFocus;
+  }
+};
+
 // Native list selection keeps click and keyboard projection behavior together.
 class LyricGridList : public QListWidget {
 public:
   explicit LyricGridList(QWidget *parent = nullptr) : QListWidget(parent) {
+    setItemDelegate(new LyricCardDelegate(this));
     setViewMode(QListView::IconMode);
     setFlow(QListView::LeftToRight);
     setWrapping(true);
