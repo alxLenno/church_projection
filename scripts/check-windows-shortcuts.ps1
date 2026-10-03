@@ -1,9 +1,13 @@
 $ErrorActionPreference = 'Stop'
 $installer = (Resolve-Path 'build/ChurchProjection-1.1.0-win64.exe').Path
 $installDir = Join-Path $env:RUNNER_TEMP 'ChurchProjectionShortcutTest'
-$process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -Wait -PassThru
+$process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -PassThru
+if (-not $process.WaitForExit(120000)) {
+    Stop-Process -Id $process.Id -Force
+    throw 'Silent installation timed out'
+}
 if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
-$expectedExe = Join-Path $installDir 'bin/ChurchProjection.exe'
+$expectedExe = [IO.Path]::GetFullPath((Join-Path $installDir 'bin/ChurchProjection.exe'))
 if (-not (Test-Path $expectedExe)) { throw 'Installed app is missing' }
 $shell = New-Object -ComObject WScript.Shell
 function Check-Shortcut($paths, $label) {
