@@ -1929,10 +1929,12 @@ void ControlWindow::onQuickSearch() {
   QString version =
       currentBibleVersion.isEmpty() ? "NKJV" : currentBibleVersion;
   auto results = BibleManager::instance().search(query, version);
-  if (results.empty())
-    return;
-
   bibleVerseList->clear();
+  if (results.empty()) {
+    auto *empty = new QListWidgetItem("No matching scripture in " + version, bibleVerseList);
+    empty->setFlags(Qt::NoItemFlags);
+    return;
+  }
   for (const auto &v : results) {
     QListWidgetItem *item = new QListWidgetItem();
 
@@ -3152,8 +3154,8 @@ void ControlWindow::setupBrowserTab(QWidget *container) {
   auto doBibleSearch = [this]() {
     m_scriptureLookup->cancel();
     QString query = m_bibleSearchInput->text().trimmed();
-    if (query.startsWith('@')) {
-      query = query.mid(1).trimmed();
+    if (query.startsWith('@')) query = query.mid(1).trimmed();
+    if (query.size() >= 2 && BibleManager::instance().search(query, m_selectedBibleVersion).empty()) {
       m_bibleResultsList->clear();
       if (query.size() < 2) return;
       auto *loading = new QListWidgetItem("AI is finding scripture…", m_bibleResultsList);

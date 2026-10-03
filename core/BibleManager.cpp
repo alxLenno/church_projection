@@ -56,6 +56,7 @@ void BibleManager::loadBibles() {
     return;
   }
 
+  versions.clear();
   qDebug() << "Bible assets found at:" << bibleDir;
 
   QDir dir(bibleDir);
@@ -89,7 +90,7 @@ void BibleManager::parseXML(const QString &filePath,
   int currentChapter = 0;
   int depth = 0;
 
-  BibleData &data = versions[versionName];
+  BibleData data;
 
   while (!xml.atEnd() && !xml.hasError()) {
     QXmlStreamReader::TokenType token = xml.readNext();
@@ -97,25 +98,27 @@ void BibleManager::parseXML(const QString &filePath,
     if (token == QXmlStreamReader::StartElement) {
       QString name = xml.name().toString();
 
-      if (name == "b") {
-        QString originalName = xml.attributes().value("n").toString();
+      if (name == "b" || name == "BIBLEBOOK") {
+        QString originalName = xml.attributes().value(name == "b" ? "n" : "bname").toString();
         currentBook = normalizeBookName(originalName);
         // Store localized name mapping: Normalized -> Original
         // "Genesis" -> "Mwanzo"
         data.displayNames[currentBook] = originalName;
-      } else if (name == "c") {
-        currentChapter = xml.attributes().value("n").toInt();
-      } else if (name == "v") {
-        int verseNum = xml.attributes().value("n").toInt();
-        QString text = xml.readElementText();
-        data.content[currentBook][currentChapter][verseNum] = text;
+      } else if (name == "c" || name == "CHAPTER") {
+        currentChapter = xml.attributes().value(name == "c" ? "n" : "cnumber").toInt();
+      } else if (name == "v" || name == "VERS") {
+        int verseNum = xml.attributes().value(name == "v" ? "n" : "vnumber").toInt();
+        QString text = xml.readElementText(QXmlStreamReader::IncludeChildElements).trimmed();
+        if (!currentBook.isEmpty() && currentChapter > 0 && verseNum > 0 && !text.isEmpty())
+          data.content[currentBook][currentChapter][verseNum] = text;
       }
     }
   }
 
   if (xml.hasError()) {
     qWarning() << "XML Parse Error in" << filePath << ":" << xml.errorString();
-  } else {
+  } else if (!data.content.empty()) {
+    versions[versionName] = data;
     qDebug() << "Loaded Bible:" << versionName << "with" << data.content.size()
              << "books";
   }
@@ -441,18 +444,21 @@ QString BibleManager::normalizeBookName(const QString &input) {
       {"ufu", "Revelation"},
       {"ufunuo wa yohana", "Revelation"}};
 
-  QString lower = input.toLower().remove('.');
+  QString lower = input.trimmed().simplified().toLower().remove('.');
   // Try strict match
   if (bookMap.count(lower))
     return bookMap.at(lower);
 
-  // Try prefix match if len >= 2
+  // Prefixes must identify one canonical book, never the first map entry.
+  QString candidate;
   if (lower.length() >= 2) {
     for (const auto &[key, val] : bookMap) {
-      if (key.startsWith(lower))
-        return val;
+      if (!key.startsWith(lower)) continue;
+      if (!candidate.isEmpty() && candidate != val) return input;
+      candidate = val;
     }
   }
+  if (!candidate.isEmpty()) return candidate;
   return input; // Return original if no match
 }
 
@@ -466,17 +472,17 @@ std::vector<BibleVerse> BibleManager::search(const QString &query,
   std::vector<QString> versionsToSearch;
   if (!version.isEmpty() && versions.count(version)) {
     versionsToSearch.push_back(version);
+  } else if (version.isEmpty()) {
+    for (const auto &[name, data] : versions) versionsToSearch.push_back(name);
   } else {
-    for (const auto &[name, data] : versions) {
-      versionsToSearch.push_back(name);
-    }
+    return results;
   }
 
   // 1. Try parsing as Reference: "Book Chapter:Verse" or "Book
   // Chapter:Verse-Verse" Flexible Regex: Group 1: Book name, Group 2: Chapter,
   // Group 3: Start Verse, Group 4: End Verse
   QRegularExpression refRegex(
-      R"(^([1-3]?\s*[a-zA-Z\x80-\xff\.]+)\s*(\d*)\s*[:\s]?\s*(\d*)?\s*-?\s*(\d*)?$)");
+      R"(^([1-3]?\s*[\p{L}.]+(?:\s+[\p{L}.]+)*)\s*(\d*)\s*[:\s]?\s*(\d*)?\s*-?\s*(\d*)?$)");
   QRegularExpressionMatch match = refRegex.match(query.trimmed());
 
   if (match.hasMatch()) {
@@ -537,9 +543,10 @@ std::vector<BibleVerse> BibleManager::search(const QString &query,
   // 2. Fallback: Keyword search
   // Only if no results found above AND query looks like a keyword (not a failed
   // reference)
-  if (results.empty() && query.length() > 3) {
+  if (results.empty() && query.length() > 3 && !(match.hasMatch() && !match.captured(2).isEmpty())) {
     QString lowerQuery = query.toLower();
-    for (const auto &[verName, data] : versions) {
+    for (const auto &verName : versionsToSearch) {
+      const auto &data = versions.at(verName);
       for (const auto &[book, chapters] : data.content) {
         for (const auto &[chapNum, verses] : chapters) {
           for (const auto &[verseNum, text] : verses) {
@@ -581,15 +588,6 @@ QStringList BibleManager::getBooks(const QString &version) {
     // XML parsing order might not be preserved if we use std::map<QString,
     // ...>. We should probably rely on a fixed list of books for order or
     // change structure. For now, return keys.
-    return books;
-  }
-  // Fallback: return keys from first available version if specific one not
-  // found?
-  if (!versions.empty()) {
-    QStringList books;
-    for (const auto &[bookName, _] : versions.begin()->second.content) {
-      books.append(bookName);
-    }
     return books;
   }
   return {};

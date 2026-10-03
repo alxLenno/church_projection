@@ -133,7 +133,10 @@ void NotesWidget::onTextChanged() {
   const auto cursor = editor->textCursor();
   const QString text = cursor.block().text().left(cursor.positionInBlock());
   const int at = text.lastIndexOf('@');
-  if (at < 0 || (at > 0 && !text[at - 1].isSpace())) return;
+  if (at < 0 || (at > 0 && !text[at - 1].isSpace())) {
+    resultsList->clear();
+    return;
+  }
   pendingQuery = text.mid(at + 1).trimmed();
   if (pendingQuery.size() >= 2) searchTimer->start();
 }

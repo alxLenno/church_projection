@@ -65,8 +65,9 @@ jobs:
     - name: Build
       run: cmake --build build --config MinSizeRel --parallel
 
-    - name: Verify Windows fullscreen projection
-      if: runner.os == 'Windows'
+    - name: Verify Bible, Notes and projection
+      env:
+        QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'offscreen' || 'windows' }}
       run: ctest --test-dir build -C MinSizeRel --output-on-failure
 
     - name: Verify Windows executable icon
@@ -82,13 +83,22 @@ jobs:
       run: ./scripts/check-windows-shortcuts.ps1
 
     - name: Publish corrected Windows installer
-      if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch' && inputs.windows_only
+      if: runner.os == 'Windows' && github.event_name == 'workflow_dispatch'
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        Copy-Item build/ChurchProjection-1.2.2-win64.exe build/ChurchProjection-1.2.2-Windows-x64-Setup.exe
-        python scripts/check-windows-icon.py build/ChurchProjection-1.2.2-Windows-x64-Setup.exe
-        gh release upload v1.2.2 build/ChurchProjection-1.2.2-Windows-x64-Setup.exe --repo $env:GITHUB_REPOSITORY
+        Copy-Item build/ChurchProjection-1.2.3-win64.exe build/ChurchProjection-1.2.3-Windows-x64-Setup.exe
+        python scripts/check-windows-icon.py build/ChurchProjection-1.2.3-Windows-x64-Setup.exe
+        gh release upload v1.2.3 build/ChurchProjection-1.2.3-Windows-x64-Setup.exe --repo $env:GITHUB_REPOSITORY
+
+    - name: Publish Mac installer
+      if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        cp build/ChurchProjection-1.2.3-Darwin.dmg build/ChurchProjection-1.2.3-macOS-AppleSilicon.dmg
+        hdiutil verify build/ChurchProjection-1.2.3-macOS-AppleSilicon.dmg
+        gh release upload v1.2.3 build/ChurchProjection-1.2.3-macOS-AppleSilicon.dmg --repo "$GITHUB_REPOSITORY"
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4

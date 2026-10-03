@@ -47,8 +47,8 @@ add_executable(ChurchProjection WIN32 MACOSX_BUNDLE
 set_target_properties(ChurchProjection PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.lennoxkk.ChurchProjection"
     MACOSX_BUNDLE_BUNDLE_NAME "ChurchProjection"
-    MACOSX_BUNDLE_BUNDLE_VERSION "1.2.2"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.2"
+    MACOSX_BUNDLE_BUNDLE_VERSION "1.2.3"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.3"
 )
 
 if(WIN32)
@@ -129,6 +129,13 @@ elseif(APPLE)
                 message(FATAL_ERROR \"macdeployqt failed: \${res}\")
             endif()
             execute_process(
+                COMMAND \"${Python3_EXECUTABLE}\" \"${CMAKE_SOURCE_DIR}/scripts/thin-macos.py\" \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\" \"${CMAKE_SYSTEM_PROCESSOR}\"
+                RESULT_VARIABLE thin_result
+            )
+            if(NOT thin_result EQUAL 0)
+                message(FATAL_ERROR \"Mac architecture thinning failed\")
+            endif()
+            execute_process(
                 COMMAND \"${Python3_EXECUTABLE}\" \"${CMAKE_SOURCE_DIR}/scripts/fix-macos-dependencies.py\" \"\${CMAKE_INSTALL_PREFIX}/ChurchProjection.app\"
                 RESULT_VARIABLE repair_result
             )
@@ -151,31 +158,31 @@ set(CPACK_VERBATIM_VARIABLES ON)
 set(CPACK_PACKAGE_NAME "ChurchProjection")
 set(CPACK_PACKAGE_VENDOR "LennoxKK")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Church Projection System")
-set(CPACK_PACKAGE_VERSION "1.2.2")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "ChurchProjection 1.2.2")
-set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "ChurchProjection 1.2.2")
+set(CPACK_PACKAGE_VERSION "1.2.3")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "ChurchProjection 1.2.3")
+set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "ChurchProjection 1.2.3")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE") # Optional: Create a LICENSE file if needed
 
 if(WIN32)
     set(CPACK_GENERATOR "NSIS;ZIP")
     set(CPACK_NSIS_MODIFY_PATH OFF)
     set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
-    set(CPACK_NSIS_DISPLAY_NAME "Church Projection 1.2.2")
-    set(CPACK_NSIS_PACKAGE_NAME "Church Projection 1.2.2")
+    set(CPACK_NSIS_DISPLAY_NAME "Church Projection 1.2.3")
+    set(CPACK_NSIS_PACKAGE_NAME "Church Projection 1.2.3")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
     # Explicit shortcuts are independent of the optional NSIS menu page.
     set(CPACK_PACKAGE_EXECUTABLES "")
     set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
     set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS [=[
-      CreateDirectory "$SMPROGRAMS\ChurchProjection 1.2.2"
-      CreateShortCut "$SMPROGRAMS\ChurchProjection 1.2.2\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
-      CreateShortCut "$DESKTOP\ChurchProjection 1.2.2.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+      CreateDirectory "$SMPROGRAMS\ChurchProjection 1.2.3"
+      CreateShortCut "$SMPROGRAMS\ChurchProjection 1.2.3\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+      CreateShortCut "$DESKTOP\ChurchProjection 1.2.3.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
     ]=])
     set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS [=[
-      Delete "$SMPROGRAMS\ChurchProjection 1.2.2\ChurchProjection.lnk"
-      Delete "$DESKTOP\ChurchProjection 1.2.2.lnk"
-      RMDir "$SMPROGRAMS\ChurchProjection 1.2.2"
+      Delete "$SMPROGRAMS\ChurchProjection 1.2.3\ChurchProjection.lnk"
+      Delete "$DESKTOP\ChurchProjection 1.2.3.lnk"
+      RMDir "$SMPROGRAMS\ChurchProjection 1.2.3"
     ]=])
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop;ZIP")
@@ -196,4 +203,19 @@ if(BUILD_TESTING)
     target_link_libraries(ProjectionSmoke PRIVATE Qt6::Widgets Qt6::Multimedia)
     add_test(NAME projection-fullscreen COMMAND ProjectionSmoke)
     set_tests_properties(projection-fullscreen PROPERTIES TIMEOUT 20)
+endif()
+
+if(BUILD_TESTING)
+    add_executable(BibleLookupCheck tests/bible-lookup.cpp core/BibleManager.cpp core/BibleManager.h)
+    target_include_directories(BibleLookupCheck PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_compile_definitions(BibleLookupCheck PRIVATE CHURCH_PROJECTION_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(BibleLookupCheck PRIVATE Qt6::Core)
+    add_test(NAME bible-lookup COMMAND BibleLookupCheck)
+endif()
+if(BUILD_TESTING)
+    add_executable(NotesLookupCheck tests/notes-lookup.cpp ui/NotesWidget.cpp ui/NotesWidget.h core/BibleManager.cpp core/BibleManager.h)
+    target_include_directories(NotesLookupCheck PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_compile_definitions(NotesLookupCheck PRIVATE CHURCH_PROJECTION_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(NotesLookupCheck PRIVATE Qt6::Widgets Qt6::Network)
+    add_test(NAME notes-lookup COMMAND NotesLookupCheck)
 endif()
