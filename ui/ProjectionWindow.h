@@ -3,7 +3,7 @@
 #include <QColor>
 #include <QImage>
 #include <QMediaPlayer>
-#include <QOpenGLWidget>
+#include <QWidget>
 #include <QPainter>
 #include <QPixmap>
 #include <QResizeEvent>
@@ -17,7 +17,7 @@
 #include "../core/StageOverlay.h"
 #include <QElapsedTimer>
 
-class ProjectionWindow : public QOpenGLWidget {
+class ProjectionWindow : public QWidget {
   Q_OBJECT
 public:
   void setStageOverlay(const Projection::StageOverlay &value) {

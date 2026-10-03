@@ -65,6 +65,10 @@ jobs:
     - name: Build
       run: cmake --build build --config MinSizeRel --parallel
 
+    - name: Verify Windows fullscreen projection
+      if: runner.os == 'Windows'
+      run: ctest --test-dir build -C MinSizeRel --output-on-failure
+
     - name: Verify Windows executable icon
       if: runner.os == 'Windows'
       run: python scripts/check-windows-icon.py build/MinSizeRel/ChurchProjection.exe
@@ -82,9 +86,9 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        Copy-Item build/ChurchProjection-1.1.0-win64.exe build/ChurchProjection-Windows-x64-shortcut-fixed.exe
-        python scripts/check-windows-icon.py build/ChurchProjection-Windows-x64-shortcut-fixed.exe
-        gh release upload mac-launch-fix-20261003 build/ChurchProjection-Windows-x64-shortcut-fixed.exe --repo $env:GITHUB_REPOSITORY --clobber
+        Copy-Item build/ChurchProjection-1.1.0-win64.exe build/ChurchProjection-Windows-x64-fixed.exe
+        python scripts/check-windows-icon.py build/ChurchProjection-Windows-x64-fixed.exe
+        gh release upload mac-launch-fix-20261003 build/ChurchProjection-Windows-x64-fixed.exe --repo $env:GITHUB_REPOSITORY --clobber
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4

@@ -6,7 +6,7 @@
 
 using namespace Projection;
 
-ProjectionWindow::ProjectionWindow(QWidget *parent) : QOpenGLWidget(parent) {
+ProjectionWindow::ProjectionWindow(QWidget *parent) : QWidget(parent) {
   setWindowFlag(Qt::FramelessWindowHint);
   resize(1920, 1080);
   // Stays hidden until togglePresentation() explicitly geometries and shows
@@ -540,7 +540,7 @@ void ProjectionWindow::resizeEvent(QResizeEvent *event) {
     ls->content.cachedPixmap = QPixmap();
     ls->content.cachedPixmapSize = QSize();
   }
-  QOpenGLWidget::resizeEvent(event);
+  QWidget::resizeEvent(event);
 }
 
 void ProjectionWindow::handleMediaPlayerError(int layerIdx) {

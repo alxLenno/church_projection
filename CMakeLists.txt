@@ -185,3 +185,13 @@ else()
 endif()
 
 include(CPack)
+
+# Exercise the real projection renderer and native fullscreen transitions.
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(ProjectionSmoke tests/projection-smoke.cpp ui/ProjectionWindow.cpp ui/ProjectionWindow.h)
+    target_include_directories(ProjectionSmoke PRIVATE "${CMAKE_SOURCE_DIR}")
+    target_link_libraries(ProjectionSmoke PRIVATE Qt6::Widgets Qt6::Multimedia)
+    add_test(NAME projection-fullscreen COMMAND ProjectionSmoke)
+    set_tests_properties(projection-fullscreen PROPERTIES TIMEOUT 20)
+endif()

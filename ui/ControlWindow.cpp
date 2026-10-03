@@ -2338,6 +2338,12 @@ void ControlWindow::togglePresentation() {
       }
     }
 
+    // Create the native handle before selecting the output display.
+    projection->winId();
+    if (!targetScreen || !projection->windowHandle()) {
+      isPresenting = false;
+      return;
+    }
     projection->windowHandle()->setScreen(targetScreen);
     projection->setGeometry(targetScreen->geometry());
     projection->showFullScreen();
