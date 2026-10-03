@@ -16,4 +16,7 @@ struct Song {
   QString title;
   QString artist;
   QStringList verses;
+  QString bilingualLyrics;
+  QString swahiliLyrics;
+  bool swahiliOnly = false;
 };

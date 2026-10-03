@@ -191,12 +191,15 @@ private:
   QPushButton *m_pinSongBtn = nullptr;
   QTimer *m_songLookupTimer = nullptr;
   void searchSongLibrary();
-  void findSongMatches(const QString &query);
+  void findSongMatches(const QString &query, bool allowBrowser = true);
   void openSongBrowser(const QString &query);
   QListWidget *verseList;
   QLineEdit *titleEdit;
   QLineEdit *artistEdit;
   QTextEdit *lyricsEdit;
+  QString bilingualLyrics, swahiliLyrics;
+  bool swahiliOnly = false;
+  QPushButton *swahiliLyricsButton = nullptr, *bilingualLyricsButton = nullptr;
 
   QPushButton *nextBtn;
   QPushButton *prevBtn;

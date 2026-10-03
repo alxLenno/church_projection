@@ -1,4 +1,6 @@
 #include "ui/NotesWidget.h"
+#include "core/LyricFormatter.h"
+#include "core/SongLookup.h"
 #include <QApplication>
 #include <QEventLoop>
 #include <QPushButton>
@@ -25,5 +27,10 @@ int main(int argc, char **argv) {
   notes.setCurrentVersion("MSG"); editor->setPlainText("@love");
   auto cursor = editor->textCursor(); cursor.movePosition(QTextCursor::End); editor->setTextCursor(cursor); wait();
   for (int i = 0; i < results->count(); ++i) if (!results->item(i)->data(Qt::UserRole + 1).toString().endsWith("(MSG)")) qFatal("MSG Notes keyword leaked another version");
+  if (songMentionQuery("@Amazing Grace") != "Amazing Grace" || songMentionQuery("Find @Amazing Grace") != "Amazing Grace" || !songMentionQuery("mail@example.com").isNull() || !hasSongMention("Lyrics\n@Jesus")) qFatal("Song mention regression");
+  const QString pasted = "Zaidi, zaidi ***(More, more)***\\\nNimfahamu Yes&#x75; ***(More about Jesus)***";
+  const QString formatted = "Zaidi, zaidi\nMore, more\n\nNimfahamu Yesu\nMore about Jesus";
+  if (LyricFormatter::words(pasted) != LyricFormatter::words(formatted)) qFatal("Bilingual cleanup failed word preservation");
+  if (LyricFormatter::words(pasted) == LyricFormatter::words(formatted + " invented words")) qFatal("Added lyrics were accepted");
   qInfo() << "PASS: Notes @John 3 in all translations and MSG keyword lookup";
 }

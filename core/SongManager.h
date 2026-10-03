@@ -47,6 +47,9 @@ public:
       obj["artist"] = song.artist;
       obj["pinned"] = song.isPinned();
       obj["lastUsed"] = QString::number(song.lastUsed);
+      obj["bilingualLyrics"] = song.bilingualLyrics;
+      obj["swahiliLyrics"] = song.swahiliLyrics;
+      obj["swahiliOnly"] = song.swahiliOnly;
       obj["verses"] = QJsonArray::fromStringList(song.verses);
       array.append(obj);
     }
@@ -82,6 +85,9 @@ public:
       Song s;
       s.title = obj["title"].toString();
       s.artist = obj["artist"].toString();
+      s.bilingualLyrics = obj["bilingualLyrics"].toString();
+      s.swahiliLyrics = obj["swahiliLyrics"].toString();
+      s.swahiliOnly = obj["swahiliOnly"].toBool();
       s.pinned = obj["pinned"].toBool();
       s.lastUsed = obj["lastUsed"].toString().toLongLong();
       QJsonArray verseArray = obj["verses"].toArray();

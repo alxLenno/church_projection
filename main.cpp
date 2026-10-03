@@ -39,7 +39,7 @@ int main(int argc, char *argv[]) {
   // App metadata for QSettings consistency
   app.setApplicationName("ChurchProjection");
   app.setOrganizationName("LennoxKK");
-  app.setApplicationVersion("1.2.3");
+  app.setApplicationVersion("1.2.4");
 
   // Prevent app from quitting when the last "visible" window (the dashboard) is
   // closed. We handle quitting manually via Cmd+Q or Menu.

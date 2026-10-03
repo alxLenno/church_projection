@@ -28,7 +28,7 @@ ProjectionWindow::ProjectionWindow(QWidget *parent) : QWidget(parent) {
   renderTimer = new QTimer(this);
   connect(renderTimer, &QTimer::timeout, this, [this]() {
     // Only update if scrolling is active
-    bool needsUpdate = false;
+    bool needsUpdate = stageOverlay.enabled && (stageOverlay.newsStyle || (stageOverlay.scrolling && !stageOverlay.text.isEmpty()));
     for (auto len : layers) {
       if (len->content.formatting.isScrolling && !len->content.text.isEmpty()) {
         len->scrollOffset += (float)len->content.formatting.scrollSpeed;
@@ -476,6 +476,13 @@ void ProjectionWindow::drawText(QPainter &painter, const Content &content,
     }
   }
 
+  // A configured font size is a ceiling, never permission to overflow.
+  // Fit authored lyric lines into the space reserved above the news bar.
+  if (currentLayout == LayoutType::Single) {
+    const bool preserveLines = preserveSplitLines(text);
+    option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
+    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(), qMax(1,fontSize), fmt.isScrolling, preserveLines);
+  }
   QFont font(fmt.fontFamily, fontSize, QFont::Bold);
   painter.setFont(font);
 

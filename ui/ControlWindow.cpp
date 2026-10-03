@@ -1,4 +1,7 @@
 #include "ControlWindow.h"
+#include "../core/LyricFormatter.h"
+#include "../core/SongLookup.h"
+#include <QMimeData>
 #include "../core/BibleManager.h"
 #include "../core/ScriptureLookup.h"
 #include "ThemeEditorDialog.h"
@@ -383,6 +386,17 @@ protected:
                        const QModelIndex &index) const override {
     QStyledItemDelegate::initStyleOption(option, index);
     option->state &= ~QStyle::State_HasFocus;
+  }
+};
+
+class LyricPasteEditor : public QTextEdit {
+public:
+  using QTextEdit::QTextEdit;
+  std::function<void()> afterPaste;
+protected:
+  void insertFromMimeData(const QMimeData *source) override {
+    QTextEdit::insertFromMimeData(source);
+    if (source->hasText() && afterPaste) afterPaste();
   }
 };
 
@@ -1286,16 +1300,16 @@ void ControlWindow::searchSongLibrary() {
   // A lookup is a line beginning with @, read up to the editing cursor.
   // Ordinary lyrics and email addresses remain ordinary text.
   const auto cursor = lyricsEdit->textCursor();
-  QString line = cursor.block().text().left(cursor.positionInBlock()).trimmed();
-  if (!lyricsEdit->hasFocus() || !line.startsWith('@')) {
+  const QString query = songMentionQuery(cursor.block().text().left(cursor.positionInBlock()));
+  if (!lyricsEdit->hasFocus() || query.isNull()) {
     m_songMatches->clear();
     m_songMatches->hide();
     return;
   }
-  findSongMatches(line.mid(1).trimmed());
+  findSongMatches(query);
 }
 
-void ControlWindow::findSongMatches(const QString &query) {
+void ControlWindow::findSongMatches(const QString &query, bool allowBrowser) {
   m_songMatches->clear();
   m_songMatches->hide();
   const auto &songs = songManager->getSongs();
@@ -1309,7 +1323,7 @@ void ControlWindow::findSongMatches(const QString &query) {
     }
   }
   if (m_songMatches->count()) m_songMatches->show();
-  else if (!query.isEmpty()) openSongBrowser(query);
+  else if (allowBrowser && !query.isEmpty()) openSongBrowser(query);
 }
 
 void ControlWindow::openSongBrowser(const QString &query) {
@@ -1390,11 +1404,93 @@ void ControlWindow::setupSongTab(QWidget *container) {
   auto *editorLabel = new QLabel("LYRICS EDITOR · Type @song name to find a song");
   editorLabel->setStyleSheet("color: #94a3b8; font-size: 11px;");
   editorLayout->addWidget(editorLabel);
-  lyricsEdit = new QTextEdit();
+  auto *pasteEditor = new LyricPasteEditor();
+  lyricsEdit = pasteEditor;
   lyricsEdit->setAcceptRichText(false);
   lyricsEdit->setPlaceholderText("Paste lyrics here… Use blank lines between sections.\nType @song name on a new line to search.");
   lyricsEdit->setMinimumHeight(100);
   editorLayout->addWidget(lyricsEdit, 1);
+  auto *formatRow = new QHBoxLayout();
+  auto *formatButton = new QPushButton("Format lyrics with AI");
+  auto *formatStatus = new QLabel();
+  formatStatus->setWordWrap(true);
+  formatStatus->setStyleSheet("color: #94a3b8; font-size: 11px;");
+  swahiliLyricsButton = new QPushButton("Swahili only");
+  bilingualLyricsButton = new QPushButton("Swahili + English");
+  swahiliLyricsButton->setCheckable(true);
+  bilingualLyricsButton->setCheckable(true);
+  auto *languageGroup = new QButtonGroup(this);
+  languageGroup->addButton(swahiliLyricsButton);
+  languageGroup->addButton(bilingualLyricsButton);
+  bilingualLyricsButton->setChecked(true);
+  auto *languageRow = new QHBoxLayout();
+  languageRow->addWidget(swahiliLyricsButton);
+  languageRow->addWidget(bilingualLyricsButton);
+  languageRow->addStretch();
+  editorLayout->addLayout(languageRow);
+  formatRow->addWidget(formatButton);
+  formatRow->addWidget(formatStatus, 1);
+  editorLayout->addLayout(formatRow);
+  auto *formatter = new LyricFormatter(this);
+  auto formatLyrics = [this, formatter, formatButton, formatStatus](bool onlySwahili = false) {
+    if (!formatButton->isEnabled()) return;
+    if (!bilingualLyrics.isEmpty()) {
+      if (swahiliOnly) swahiliLyrics = lyricsEdit->toPlainText();
+      else bilingualLyrics = lyricsEdit->toPlainText();
+    }
+    const QString original = lyricsEdit->toPlainText();
+    if (original.trimmed().isEmpty() || hasSongMention(original) || !formatButton->isEnabled()) return;
+    const int song = currentSongIndex;
+    formatButton->setEnabled(false);
+    formatStatus->setText("Detecting languages and formatting…");
+    const QString source = bilingualLyrics.isEmpty() ? original : bilingualLyrics;
+    formatter->format(source, [this, formatter, original, song, onlySwahili, formatButton, formatStatus](QString text, QString error) {
+      formatButton->setEnabled(true);
+      if (song != currentSongIndex || original != lyricsEdit->toPlainText()) {
+        formatStatus->setText("Lyrics changed while formatting. Try again."); return;
+      }
+      if (!error.isEmpty()) {
+        swahiliLyricsButton->setChecked(swahiliOnly); bilingualLyricsButton->setChecked(!swahiliOnly);
+        formatStatus->setText(error); return;
+      }
+      bilingualLyrics = text;
+      swahiliLyrics = formatter->swahiliText;
+      swahiliOnly = onlySwahili;
+      auto cursor = lyricsEdit->textCursor();
+      cursor.beginEditBlock(); cursor.select(QTextCursor::Document); cursor.insertText(swahiliOnly ? swahiliLyrics : bilingualLyrics); cursor.endEditBlock();
+      swahiliLyricsButton->setChecked(swahiliOnly);
+      bilingualLyricsButton->setChecked(!swahiliOnly);
+      formatStatus->setText("Formatted. Review and save changes. Undo is available.");
+    });
+  };
+  auto switchLanguage = [this, formatLyrics, formatButton](bool only) {
+    if (!formatButton->isEnabled()) {
+      swahiliLyricsButton->setChecked(swahiliOnly); bilingualLyricsButton->setChecked(!swahiliOnly); return;
+    }
+    if (bilingualLyrics.isEmpty() || swahiliLyrics.isEmpty()) { formatLyrics(only); return; }
+    if (swahiliOnly) swahiliLyrics = lyricsEdit->toPlainText();
+    else bilingualLyrics = lyricsEdit->toPlainText();
+    swahiliOnly = only;
+    auto cursor = lyricsEdit->textCursor(); cursor.beginEditBlock(); cursor.select(QTextCursor::Document);
+    cursor.insertText(only ? swahiliLyrics : bilingualLyrics); cursor.endEditBlock();
+  };
+  connect(swahiliLyricsButton, &QPushButton::clicked, this, [switchLanguage] { switchLanguage(true); });
+  connect(bilingualLyricsButton, &QPushButton::clicked, this, [switchLanguage] { switchLanguage(false); });
+  connect(formatButton, &QPushButton::clicked, this, [this, formatLyrics] { formatLyrics(swahiliOnly); });
+  connect(lyricsEdit, &QTextEdit::textChanged, this, [this]() {
+    if (hasSongMention(lyricsEdit->toPlainText())) return;
+    verseList->clear();
+    const auto sections = lyricsEdit->toPlainText().split("\n\n", Qt::SkipEmptyParts);
+    for (int i = 0; i < sections.size(); ++i) {
+      auto *item = new QListWidgetItem(QString("Section %1\n%2").arg(i + 1).arg(sections[i]), verseList);
+      item->setData(Qt::UserRole, sections[i]);
+    }
+  });
+  pasteEditor->afterPaste = [this, formatLyrics]() {
+    bilingualLyrics.clear(); swahiliLyrics.clear(); swahiliOnly = false;
+    if (lyricsEdit->toPlainText().contains('\n') && !hasSongMention(lyricsEdit->toPlainText())) formatLyrics();
+  };
+
   m_songMatches = new QListWidget();
   m_songMatches->setMaximumHeight(130);
   m_songMatches->hide();
@@ -1403,7 +1499,14 @@ void ControlWindow::setupSongTab(QWidget *container) {
   m_songLookupTimer->setSingleShot(true);
   m_songLookupTimer->setInterval(1000);
   connect(m_songLookupTimer, &QTimer::timeout, this, &ControlWindow::searchSongLibrary);
-  auto schedule = [this]() { m_songMatches->hide(); m_songLookupTimer->start(); };
+  auto schedule = [this]() {
+    m_songLookupTimer->stop();
+    const auto cursor = lyricsEdit->textCursor();
+    const QString query = songMentionQuery(cursor.block().text().left(cursor.positionInBlock()));
+    if (query.isNull()) { m_songMatches->hide(); return; }
+    findSongMatches(query, false);
+    m_songLookupTimer->start();
+  };
   connect(lyricsEdit, &QTextEdit::textChanged, this, schedule);
   connect(lyricsEdit, &QTextEdit::cursorPositionChanged, this, schedule);
   connect(m_songMatches, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
@@ -1741,7 +1844,7 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   stageText->setAcceptRichText(false);
   stageText->setMaximumHeight(85);
   stageText->setPlaceholderText("Announcement, sermon title, speaker name…");
-  auto *stageMode = new QComboBox(); stageMode->addItems({"Static text", "Scrolling ticker"});
+  auto *stageMode = new QComboBox(); stageMode->addItems({"Static text", "Scrolling ticker", "News layout"});
   auto *stageFont = new QFontComboBox();
   auto *stageSize = new QSpinBox(); stageSize->setRange(12,120); stageSize->setSuffix(" px at 1080p");
   auto *stageSpeed = new QSpinBox(); stageSpeed->setRange(10,300);stageSpeed->setSuffix(" px / sec");
@@ -1765,28 +1868,95 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   stageY->setValue(savedStage.value("StageBar/y",90).toInt());
   stageWidth->setValue(savedStage.value("StageBar/width",100).toInt());
   stageHeight->setValue(savedStage.value("StageBar/height",10).toInt());
+  if (stageMode->currentIndex()==2 && !savedStage.value("StageBar/compactNewsLayout",false).toBool())
+    stageHeight->setValue(12);
   colours->first=savedStage.value("StageBar/foreground",QColor(Qt::white)).value<QColor>();
   colours->second=savedStage.value("StageBar/background",QColor(15,23,42,230)).value<QColor>();
+  auto *newsTitle = new QLineEdit(savedStage.value("StageBar/newsTitle", "SUNDAY SERVICE").toString());
+  auto *newsHeadline = new QLineEdit(savedStage.value("StageBar/newsHeadline").toString());
+  newsHeadline->setPlaceholderText("Sermon title or main announcement");
+  auto *newsLabel = new QLineEdit(savedStage.value("StageBar/newsLabel", "LIVE").toString());
+  auto *newsClock = new QCheckBox("Show clock");
+  newsClock->setChecked(savedStage.value("StageBar/newsClock",true).toBool());
+  auto newsColours = std::make_shared<Projection::StageOverlay>();
+  newsColours->titleBackground = savedStage.value("StageBar/titleBg",newsColours->titleBackground).value<QColor>();
+  newsColours->titleForeground = savedStage.value("StageBar/titleFg",newsColours->titleForeground).value<QColor>();
+  newsColours->headlineBackground = savedStage.value("StageBar/headlineBg",newsColours->headlineBackground).value<QColor>();
+  newsColours->headlineForeground = savedStage.value("StageBar/headlineFg",newsColours->headlineForeground).value<QColor>();
+  newsColours->labelBackground = savedStage.value("StageBar/labelBg",newsColours->labelBackground).value<QColor>();
+  newsColours->labelForeground = savedStage.value("StageBar/labelFg",newsColours->labelForeground).value<QColor>();
   stageForm->addRow(stageEnabled);
   stageForm->addRow("Text",stageText);stageForm->addRow("Mode",stageMode);
+  stageForm->addRow("Title strip",newsTitle);
+  stageForm->addRow("Headline",newsHeadline);
+  stageForm->addRow("Left label",newsLabel);
+  stageForm->addRow(newsClock);
   stageForm->addRow("Font",stageFont);stageForm->addRow("Text size",stageSize);
   stageForm->addRow("Ticker speed",stageSpeed);stageForm->addRow("Placement",stageScreen);
   stageForm->addRow("Left",stageX);stageForm->addRow("Top",stageY);
   stageForm->addRow("Width",stageWidth);stageForm->addRow("Height",stageHeight);
   stageForm->addRow(stageForeground);stageForm->addRow(stageBackground);
+  auto *newsTicker = new QPushButton("News ticker across both screens");
+  stageForm->addRow(newsTicker);
+  auto *newsLayout = new QPushButton("Use news layout across both screens");
+  stageForm->addRow(newsLayout);
   auto *saveStage = new QPushButton("Save stage layout");stageForm->addRow(saveStage);
   auto applyStage = [=]() {
-    Projection::StageOverlay bar;
-    bar.enabled=stageEnabled->isChecked();bar.text=stageText->toPlainText();bar.scrolling=stageMode->currentIndex()==1;
+    Projection::StageOverlay bar = *newsColours;
+    bar.newsStyle=stageMode->currentIndex()==2;
+    if (bar.newsStyle) {
+      const QSignalBlocker heightBlock(stageHeight), yBlock(stageY), xBlock(stageX), widthBlock(stageWidth), screenBlock(stageScreen);
+      stageHeight->setRange(6,30);
+      stageY->setMaximum(100-stageHeight->value());stageY->setValue(100-stageHeight->value());
+      stageX->setValue(0);stageWidth->setValue(100);stageScreen->setCurrentIndex(0);
+    } else { stageHeight->setRange(5,40);stageY->setMaximum(95); }
+    stageY->setEnabled(!bar.newsStyle);
+    bar.title=newsTitle->text();bar.headline=newsHeadline->text();bar.label=newsLabel->text();bar.showClock=newsClock->isChecked();
+    for (auto *field : {newsTitle,newsHeadline,newsLabel}) field->setEnabled(bar.newsStyle);
+    newsClock->setEnabled(bar.newsStyle);
+    bar.enabled=stageEnabled->isChecked();bar.text=stageText->toPlainText();bar.scrolling=stageMode->currentIndex()!=0;
     bar.font=stageFont->currentFont().family();bar.fontSize=stageSize->value();bar.speed=stageSpeed->value();
     bar.screen=stageScreen->currentIndex()-1;bar.x=stageX->value();bar.y=stageY->value();
     bar.width=stageWidth->value();bar.height=stageHeight->value();bar.foreground=colours->first;bar.background=colours->second;
     stageSpeed->setEnabled(bar.scrolling);
+    stageScreen->setEnabled(!bar.scrolling);
+    stageX->setEnabled(!bar.scrolling);
+    stageWidth->setEnabled(!bar.scrolling);
     if(projection)projection->setStageOverlay(bar);if(preview)preview->setStageOverlay(bar);
   };
   connect(stageEnabled,&QCheckBox::toggled,this,applyStage);
   connect(stageText,&QTextEdit::textChanged,this,applyStage);
   connect(stageMode,&QComboBox::currentIndexChanged,this,applyStage);
+  connect(newsTicker, &QPushButton::clicked, this, [=]() {
+    const QSignalBlocker modeBlock(stageMode), screenBlock(stageScreen), xBlock(stageX), yBlock(stageY), widthBlock(stageWidth), heightBlock(stageHeight), enabledBlock(stageEnabled);
+    stageMode->setCurrentIndex(1);
+    stageScreen->setCurrentIndex(0);
+    stageX->setValue(0); stageY->setValue(90);
+    stageWidth->setValue(100); stageHeight->setValue(10);
+    stageEnabled->setChecked(true);
+    applyStage();
+  });
+  connect(newsLayout,&QPushButton::clicked,this,[=]() {
+    const QSignalBlocker modeBlock(stageMode), screenBlock(stageScreen), xBlock(stageX), yBlock(stageY), widthBlock(stageWidth), heightBlock(stageHeight), enabledBlock(stageEnabled);
+    stageMode->setCurrentIndex(2);stageScreen->setCurrentIndex(0);
+    stageX->setValue(0);stageY->setValue(88);stageWidth->setValue(100);stageHeight->setValue(12);
+    stageEnabled->setChecked(true);applyStage();
+  });
+  for (auto *field : {newsTitle,newsHeadline,newsLabel}) connect(field,&QLineEdit::textChanged,this,applyStage);
+  connect(newsClock,&QCheckBox::toggled,this,applyStage);
+  auto colourControl = [=](const QString &label, QColor Projection::StageOverlay::*member) {
+    auto *button = new QPushButton(label);stageForm->addRow(button);
+    connect(button,&QPushButton::clicked,this,[=]() {
+      const auto value=QColorDialog::getColor((*newsColours).*member,this,label);
+      if (value.isValid()) { (*newsColours).*member=value;applyStage(); }
+    });
+  };
+  colourControl("Title background",&Projection::StageOverlay::titleBackground);
+  colourControl("Title text colour",&Projection::StageOverlay::titleForeground);
+  colourControl("Headline background",&Projection::StageOverlay::headlineBackground);
+  colourControl("Headline text colour",&Projection::StageOverlay::headlineForeground);
+  colourControl("Label / clock background",&Projection::StageOverlay::labelBackground);
+  colourControl("Label / clock text colour",&Projection::StageOverlay::labelForeground);
   connect(stageScreen,&QComboBox::currentIndexChanged,this,applyStage);
   connect(stageFont,&QFontComboBox::currentFontChanged,this,applyStage);
   for(auto *spin:{stageSize,stageSpeed,stageX,stageY,stageWidth,stageHeight})connect(spin,&QSpinBox::valueChanged,this,applyStage);
@@ -1794,6 +1964,12 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   connect(stageBackground,&QPushButton::clicked,this,[=](){auto colour=QColorDialog::getColor(colours->second,this,"Bar colour and opacity",QColorDialog::ShowAlphaChannel);if(colour.isValid()){colours->second=colour;applyStage();}});
   connect(saveStage,&QPushButton::clicked,this,[=](){
     QSettings settings;
+    settings.setValue("StageBar/compactNewsLayout",true);
+    settings.setValue("StageBar/newsTitle",newsTitle->text());settings.setValue("StageBar/newsHeadline",newsHeadline->text());
+    settings.setValue("StageBar/newsLabel",newsLabel->text());settings.setValue("StageBar/newsClock",newsClock->isChecked());
+    settings.setValue("StageBar/titleBg",newsColours->titleBackground);settings.setValue("StageBar/titleFg",newsColours->titleForeground);
+    settings.setValue("StageBar/headlineBg",newsColours->headlineBackground);settings.setValue("StageBar/headlineFg",newsColours->headlineForeground);
+    settings.setValue("StageBar/labelBg",newsColours->labelBackground);settings.setValue("StageBar/labelFg",newsColours->labelForeground);
     settings.setValue("StageBar/enabled",stageEnabled->isChecked());settings.setValue("StageBar/text",stageText->toPlainText());
     settings.setValue("StageBar/mode",stageMode->currentIndex());settings.setValue("StageBar/font",stageFont->currentFont().family());
     settings.setValue("StageBar/size",stageSize->value());settings.setValue("StageBar/speed",stageSpeed->value());
@@ -2099,6 +2275,11 @@ void ControlWindow::onSongSelected(int index) {
   m_songLookupTimer->stop();
   m_songMatches->hide();
   const QSignalBlocker lyricsSignals(lyricsEdit);
+  bilingualLyrics = song.bilingualLyrics;
+  swahiliLyrics = song.swahiliLyrics;
+  swahiliOnly = song.swahiliOnly;
+  swahiliLyricsButton->setChecked(swahiliOnly);
+  bilingualLyricsButton->setChecked(!swahiliOnly);
   lyricsEdit->setPlainText(song.verses.join("\n\n"));
 
   const QSignalBlocker verseSignals(verseList);
@@ -2141,6 +2322,12 @@ void ControlWindow::saveSong() {
   Song s = songManager->getSongs()[currentSongIndex];
   s.title = titleEdit->text();
   s.artist = artistEdit->text();
+  if (!bilingualLyrics.isEmpty()) {
+    if (swahiliOnly) swahiliLyrics = lyricsEdit->toPlainText(); else bilingualLyrics = lyricsEdit->toPlainText();
+  }
+  s.bilingualLyrics = bilingualLyrics;
+  s.swahiliLyrics = swahiliLyrics;
+  s.swahiliOnly = swahiliOnly;
   s.verses = lyricsEdit->toPlainText().split("\n\n", Qt::SkipEmptyParts);
   songManager->updateSong(currentSongIndex, s);
   updateSongList();
