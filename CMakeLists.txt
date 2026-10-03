@@ -47,8 +47,8 @@ add_executable(ChurchProjection WIN32 MACOSX_BUNDLE
 set_target_properties(ChurchProjection PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.lennoxkk.ChurchProjection"
     MACOSX_BUNDLE_BUNDLE_NAME "ChurchProjection"
-    MACOSX_BUNDLE_BUNDLE_VERSION "1.1.0"
-    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.1.0"
+    MACOSX_BUNDLE_BUNDLE_VERSION "1.2.0"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.2.0"
 )
 
 if(WIN32)
@@ -151,29 +151,31 @@ set(CPACK_VERBATIM_VARIABLES ON)
 set(CPACK_PACKAGE_NAME "ChurchProjection")
 set(CPACK_PACKAGE_VENDOR "LennoxKK")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Church Projection System")
-set(CPACK_PACKAGE_VERSION "1.1.0")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "ChurchProjection")
+set(CPACK_PACKAGE_VERSION "1.2.0")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "ChurchProjection 1.2.0")
+set(CPACK_PACKAGE_INSTALL_REGISTRY_KEY "ChurchProjection 1.2.0")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE") # Optional: Create a LICENSE file if needed
 
 if(WIN32)
     set(CPACK_GENERATOR "NSIS;ZIP")
     set(CPACK_NSIS_MODIFY_PATH OFF)
     set(CPACK_NSIS_COMPRESSOR "/SOLID lzma")
-    set(CPACK_NSIS_DISPLAY_NAME "Church Projection")
+    set(CPACK_NSIS_DISPLAY_NAME "Church Projection 1.2.0")
+    set(CPACK_NSIS_PACKAGE_NAME "Church Projection 1.2.0")
     set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
     set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/assets/AppIcon.ico")
     # Explicit shortcuts are independent of the optional NSIS menu page.
     set(CPACK_PACKAGE_EXECUTABLES "")
     set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
     set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS [=[
-      CreateDirectory "$SMPROGRAMS\ChurchProjection"
-      CreateShortCut "$SMPROGRAMS\ChurchProjection\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
-      CreateShortCut "$DESKTOP\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+      CreateDirectory "$SMPROGRAMS\ChurchProjection 1.2.0"
+      CreateShortCut "$SMPROGRAMS\ChurchProjection 1.2.0\ChurchProjection.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
+      CreateShortCut "$DESKTOP\ChurchProjection 1.2.0.lnk" "$INSTDIR\bin\ChurchProjection.exe" "" "$INSTDIR\bin\ChurchProjection.exe" 0
     ]=])
     set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS [=[
-      Delete "$SMPROGRAMS\ChurchProjection\ChurchProjection.lnk"
-      Delete "$DESKTOP\ChurchProjection.lnk"
-      RMDir "$SMPROGRAMS\ChurchProjection"
+      Delete "$SMPROGRAMS\ChurchProjection 1.2.0\ChurchProjection.lnk"
+      Delete "$DESKTOP\ChurchProjection 1.2.0.lnk"
+      RMDir "$SMPROGRAMS\ChurchProjection 1.2.0"
     ]=])
 elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop;ZIP")

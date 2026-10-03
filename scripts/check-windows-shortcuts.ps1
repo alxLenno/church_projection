@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$installer = (Resolve-Path 'build/ChurchProjection-1.1.0-win64.exe').Path
+$installer = (Resolve-Path 'build/ChurchProjection-1.2.0-win64.exe').Path
 $installDir = Join-Path $env:RUNNER_TEMP 'ChurchProjectionShortcutTest'
 $process = Start-Process -FilePath $installer -ArgumentList "/S /D=$installDir" -PassThru
 if (-not $process.WaitForExit(120000)) {
@@ -23,10 +23,10 @@ function Check-Shortcut($paths, $label) {
     throw "$label shortcut is missing or targets the wrong executable"
 }
 $programs = @('Programs', 'CommonPrograms') | ForEach-Object {
-    Join-Path ([Environment]::GetFolderPath($_)) 'ChurchProjection/ChurchProjection.lnk'
+    Join-Path ([Environment]::GetFolderPath($_)) 'ChurchProjection 1.2.0/ChurchProjection.lnk'
 }
 $desktops = @('DesktopDirectory', 'CommonDesktopDirectory') | ForEach-Object {
-    Join-Path ([Environment]::GetFolderPath($_)) 'ChurchProjection.lnk'
+    Join-Path ([Environment]::GetFolderPath($_)) 'ChurchProjection 1.2.0.lnk'
 }
 Check-Shortcut $programs 'Start menu'
 Check-Shortcut $desktops 'Desktop'
