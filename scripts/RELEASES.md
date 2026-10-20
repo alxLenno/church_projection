@@ -9,3 +9,5 @@ The smallest local archive uses xz -9e. Extract the .tar.xz and move ChurchProje
 On Windows, build with cmake --build build --config MinSizeRel and package with cpack -C MinSizeRel from build/. The NSIS installer uses solid LZMA compression. The GitHub Actions Build and Package workflow performs these steps and uploads installers as artifacts.
 
 Packages include Bible XML files and default themes. Personal imported media, song libraries, settings, source files, and build caches are excluded. Existing user data is stored separately. Browser runtimes account for most of the distribution size and are retained for full functionality.
+
+Final downloads for this release: dist/ChurchProjection-Windows-x64-Setup.exe and dist/ChurchProjection-macOS-arm64.tar.xz. The final Mac archive uses the official Qt build, has been reduced to Apple Silicon, and targets macOS 13 or newer. An optional compressed disk image is available at dist/ChurchProjection-macOS-AppleSilicon.dmg. SHA-256 checksums are in dist/SHA256SUMS.txt.

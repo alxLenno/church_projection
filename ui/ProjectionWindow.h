@@ -4,6 +4,10 @@
 #include <QImage>
 #include <QMediaPlayer>
 #include <QWidget>
+#include <QScreen>
+#include <QCloseEvent>
+#include <QMouseEvent>
+#include <QPointer>
 #include <QPainter>
 #include <QPixmap>
 #include <QResizeEvent>
@@ -27,6 +31,11 @@ public:
   void setBlackout(bool hidden) { blackout = hidden; update(); }
   void setTextVisible(bool visible) { textVisible = visible; update(); }
   explicit ProjectionWindow(QWidget *parent = nullptr);
+
+  QImage obsFrame();
+  void showOutput(bool windowed, QScreen *screen);
+  void setLayerBrowser(int layer, QWidget *browser);
+  void releaseBrowser();
 
   // New multi-layer API
   bool layerVideoMuted(int layer) const;
@@ -55,8 +64,12 @@ public:
 
 signals:
   void mediaError(const QString &message);
+  void browserReturned();
+  void outputCloseRequested();
 
 protected:
+  void mousePressEvent(QMouseEvent *event) override;
+  void closeEvent(QCloseEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
   void resizeEvent(QResizeEvent *event) override;
 
@@ -65,6 +78,9 @@ private slots:
   void onVideoFrameChanged(int layerIdx, const QVideoFrame &frame);
 
 private:
+  QPointer<QWidget> liveBrowser, browserHome;
+  int browserLayer = 0;
+  void positionBrowser();
   Projection::StageOverlay stageOverlay;
   QElapsedTimer overlayClock;
   bool blackout = false;

@@ -161,6 +161,7 @@ private:
   // Stage Controls
   QComboBox *projectionLayoutCombo;
   QComboBox *targetLayerCombo;
+  QComboBox *outputModeCombo = nullptr;
   QComboBox *screenSelectorCombo; // New: screen selector
   int currentTargetLayer = 0;
   bool chooseContentScreen();
@@ -187,6 +188,7 @@ private:
   int currentBibleChapter = 1;
 
   // -- Song Tab --
+  QLineEdit *m_editorSongSearch = nullptr;
   QListWidget *m_songMatches = nullptr;
   QPushButton *m_pinSongBtn = nullptr;
   QTimer *m_songLookupTimer = nullptr;

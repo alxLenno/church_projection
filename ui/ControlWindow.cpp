@@ -1,4 +1,7 @@
 #include "ControlWindow.h"
+#include "../core/LocalObsFeed.h"
+#include "../core/BrowserVideoLayout.h"
+#include <QClipboard>
 #include "../core/LyricFormatter.h"
 #include "../core/SongLookup.h"
 #include <QMimeData>
@@ -1297,6 +1300,12 @@ void ControlWindow::updateBibleNavButtons() {
 }
 
 void ControlWindow::searchSongLibrary() {
+  if (m_editorSongSearch && m_editorSongSearch->hasFocus()) {
+    const auto query = m_editorSongSearch->text().trimmed();
+    if (query.isEmpty()) { m_songMatches->hide(); return; }
+    findSongMatches(query);
+    return;
+  }
   // A lookup is a line beginning with @, read up to the editing cursor.
   // Ordinary lyrics and email addresses remain ordinary text.
   const auto cursor = lyricsEdit->textCursor();
@@ -1369,7 +1378,8 @@ void ControlWindow::setupSongTab(QWidget *container) {
     if (currentSongIndex < 0) return;
     Song song = songManager->getSongs()[currentSongIndex];
     if (song.isCommonItem()) return;
-    song.pinned = !song.pinned;
+    song.pinned = !song.isPinned();
+    song.pinnedDate = song.pinned ? QDate::currentDate() : QDate();
     songManager->updateSong(currentSongIndex, song);
     updateSongList();
     m_pinSongBtn->setText(song.isPinned() ? "Unpin from Recents" : "Pin to Recents");
@@ -1427,6 +1437,10 @@ void ControlWindow::setupSongTab(QWidget *container) {
   languageRow->addWidget(swahiliLyricsButton);
   languageRow->addWidget(bilingualLyricsButton);
   languageRow->addStretch();
+  m_editorSongSearch = new QLineEdit();
+  m_editorSongSearch->setPlaceholderText("Find a song by title, artist or lyrics…");
+  m_editorSongSearch->setClearButtonEnabled(true);
+  editorLayout->addWidget(m_editorSongSearch);
   editorLayout->addLayout(languageRow);
   formatRow->addWidget(formatButton);
   formatRow->addWidget(formatStatus, 1);
@@ -1499,6 +1513,18 @@ void ControlWindow::setupSongTab(QWidget *container) {
   m_songLookupTimer->setSingleShot(true);
   m_songLookupTimer->setInterval(1000);
   connect(m_songLookupTimer, &QTimer::timeout, this, &ControlWindow::searchSongLibrary);
+  connect(m_editorSongSearch, &QLineEdit::textChanged, this, [this](const QString &text) {
+    m_songLookupTimer->stop();
+    if (text.trimmed().isEmpty()) { m_songMatches->hide(); return; }
+    findSongMatches(text.trimmed(), false);
+    m_songLookupTimer->start();
+  });
+  connect(m_editorSongSearch, &QLineEdit::returnPressed, this, &ControlWindow::searchSongLibrary);
+  auto *dayTimer = new QTimer(this);
+  connect(dayTimer, &QTimer::timeout, this, [this, day = QDate::currentDate()]() mutable {
+    if (day != QDate::currentDate()) { day = QDate::currentDate(); updateSongList(); }
+  });
+  dayTimer->start(30000);
   auto schedule = [this]() {
     m_songLookupTimer->stop();
     const auto cursor = lyricsEdit->textCursor();
@@ -1511,7 +1537,10 @@ void ControlWindow::setupSongTab(QWidget *container) {
   connect(lyricsEdit, &QTextEdit::cursorPositionChanged, this, schedule);
   connect(m_songMatches, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
     const int index = item->data(Qt::UserRole).toInt();
+    m_songLookupTimer->stop();
+    m_editorSongSearch->clear();
     onSongSelected(index);
+    m_songMatches->hide();
     lyricsEdit->setFocus();
   });
   splitter->addWidget(editorPane);
@@ -1742,6 +1771,39 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   settingsGrid->addWidget(targetLayerCombo, 1, 1);
   settingsGrid->addWidget(screenLabel, 2, 0);
   settingsGrid->addWidget(screenSelectorCombo, 2, 1);
+  outputModeCombo = new QComboBox();
+  outputModeCombo->setStyleSheet(comboModernStyle);
+  outputModeCombo->addItem("Full-screen projector", false);
+  outputModeCombo->addItem("Windowed output for OBS", true);
+  outputModeCombo->setCurrentIndex(QSettings().value("Projection/WindowedOutput", false).toBool() ? 1 : 0);
+  outputModeCombo->setToolTip("OBS captures the named output window. Keep it open while switching back to the dashboard.");
+  settingsGrid->addWidget(new QLabel("Output"), 3, 0);
+  settingsGrid->addWidget(outputModeCombo, 3, 1);
+  connect(outputModeCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+    const bool windowed = outputModeCombo->itemData(index).toBool();
+    QSettings().setValue("Projection/WindowedOutput", windowed);
+    if (isPresenting) {
+      projection->showOutput(windowed, windowed ? this->screen() : projection->screen());
+      if (windowed) { raise(); activateWindow(); }
+    }
+  });
+  connect(projection, &ProjectionWindow::outputCloseRequested, this, [this] {
+    if (isPresenting) togglePresentation();
+  });
+  auto *obsFeed = new LocalObsFeed([this] {
+    if (isPresenting) return projection->obsFrame();
+    QImage black(1280, 720, QImage::Format_RGB32); black.fill(Qt::black); return black;
+  }, this);
+  auto *copyFeed = new QPushButton("Copy OBS Browser URL");
+  copyFeed->setToolTip("Add this URL as an OBS Browser source at 1920 × 1080. Carries lyrics, scripture, banners and local media pictures; audio and embedded browser video use separate OBS sources.");
+  connect(copyFeed, &QPushButton::clicked, this, [this, obsFeed] {
+    if (!obsFeed->start()) {
+      QMessageBox::warning(this, "OBS feed", "Cannot start the local OBS feed. Close other ChurchProjection instances and try again."); return;
+    }
+    QApplication::clipboard()->setText(obsFeed->url());
+    QMessageBox::information(this, "OBS Browser source", "The local feed URL has been copied.\n\nIn OBS add Browser, paste the URL, and set Width 1920 / Height 1080. Hide the old macOS Screen Capture source.\n\nKeep GO LIVE on. The feed refreshes even when the output window is covered. Audio and embedded browser videos should be separate OBS sources.");
+  });
+  settingsGrid->addWidget(copyFeed, 4, 0, 1, 2);
   settingsGrid->setColumnStretch(1, 1);
 
   cLayout->addLayout(settingsGrid);
@@ -2521,6 +2583,7 @@ void ControlWindow::togglePresentation() {
   if (!projection)
     return;
   isPresenting = !isPresenting;
+  if (!isPresenting) projection->releaseBrowser();
 
   if (isPresenting) {
     presentBtn->setText("◼  STOP");
@@ -2565,11 +2628,10 @@ void ControlWindow::togglePresentation() {
       isPresenting = false;
       return;
     }
-    projection->windowHandle()->setScreen(targetScreen);
-    projection->setGeometry(targetScreen->geometry());
-    projection->showFullScreen();
-    projection->raise();
-    projection->activateWindow();
+    const bool windowed = outputModeCombo && outputModeCombo->currentData().toBool();
+    projection->showOutput(windowed, windowed ? this->screen() : targetScreen);
+    if (windowed) { raise(); activateWindow(); }
+    else projection->activateWindow();
 
     // Both screens already retain their content, including staged media.
     projection->setBlackout(isScreenBlackened);
@@ -3243,6 +3305,47 @@ void ControlWindow::setupBrowserTab(QWidget *container) {
   searchBar->addWidget(m_addToSongsBtn);
   searchBar->addWidget(aiKeyBtn);
   layout->addLayout(searchBar);
+
+  auto *playBrowser = new QPushButton("▶ Play on screen");
+  auto *returnBrowser = new QPushButton("Return video to browser");
+  auto *videoControls = new QHBoxLayout();
+  videoControls->addWidget(playBrowser);
+  auto *pauseBrowser = new QPushButton("Play / Pause");
+  auto *muteBrowser = new QPushButton("Mute / Unmute");
+  videoControls->addWidget(pauseBrowser);
+  videoControls->addWidget(muteBrowser);
+  connect(pauseBrowser, &QPushButton::clicked, this, [this] {
+    m_webView->page()->runJavaScript("(() => { const v=document.querySelector('video'); if(v) { if(v.paused) v.play().catch(()=>{}); else v.pause(); } })()");
+  });
+  connect(muteBrowser, &QPushButton::clicked, this, [this] {
+    m_webView->page()->runJavaScript("(() => { const v=document.querySelector('video'); if(v) v.muted=!v.muted; })()");
+  });
+  videoControls->addWidget(returnBrowser);
+  videoControls->addStretch();
+  layout->addLayout(videoControls);
+  connect(playBrowser, &QPushButton::clicked, this, [this] {
+    if (!projection || !chooseContentScreen()) return;
+    const int target = currentTargetLayer;
+    m_webView->page()->runJavaScript("!!document.querySelector('video')", [this, target](const QVariant &found) {
+      if (!found.toBool()) {
+        m_browserStatus->setText("Open a video first and wait for its player to load."); return;
+      }
+      projection->setLayerBrowser(target, m_webView);
+      m_webView->page()->runJavaScript(BrowserVideoLayout::focus());
+      QTimer::singleShot(300, this, [this] {
+        if (m_webView->parentWidget() == projection)
+          m_webView->page()->runJavaScript(BrowserVideoLayout::focus());
+      });
+      if (!isPresenting) togglePresentation();
+      m_browserStatus->setText(QString("Video on Screen %1 with sound. Use Return video to browser to bring back the player.").arg(target+1));
+      if (preview) preview->setLayerText(target, "Browser video playing on screen");
+    });
+  });
+  connect(returnBrowser, &QPushButton::clicked, this, [this] { if (projection) projection->releaseBrowser(); });
+  connect(projection, &ProjectionWindow::browserReturned, this, [this] {
+    m_webView->page()->runJavaScript(BrowserVideoLayout::restore());
+    m_browserStatus->setText("Video returned to browser and paused.");
+  });
 
   // --- Status label ---
   m_browserStatus =
@@ -4332,7 +4435,8 @@ void ControlWindow::showImportLyricsDialog(const QString &title,
               "version instead of adding a duplicate?",
           QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
       if (reply == QMessageBox::Yes) {
-        newSong.pinned = existingSongs[existingIndex].isPinned();
+        newSong.pinned = existingSongs[existingIndex].pinned;
+        newSong.pinnedDate = existingSongs[existingIndex].pinnedDate;
         newSong.lastUsed = existingSongs[existingIndex].lastUsed;
         songManager->updateSong(existingIndex, newSong);
         updated = true;

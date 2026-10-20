@@ -24,8 +24,8 @@ inline int fitSplitText(const QString &text, const QString &family,
   return 1;
 }
 
-inline bool preserveSplitLines(const QString &text) {
-  for (const auto &line : text.split('\n'))
-    if (line.trimmed().size() > 80) return false;
-  return true;
+// Keep explicit paragraph breaks, but allow every line to wrap at words.
+// A character-count threshold made medium-length verses unreadably small.
+inline bool preserveSplitLines(const QString &) {
+  return false;
 }

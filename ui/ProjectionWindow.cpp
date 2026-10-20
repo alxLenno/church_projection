@@ -3,8 +3,106 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QTextOption>
+#include <QSplitter>
+#include <QWindow>
 
 using namespace Projection;
+
+QImage ProjectionWindow::obsFrame() {
+  // QWidget::render paints even when the native window is fully covered.
+  QImage image(size(), QImage::Format_RGB32);
+  image.fill(Qt::black);
+  render(&image, QPoint(), QRegion(), QWidget::DrawWindowBackground | QWidget::DrawChildren);
+  return image;
+}
+
+void ProjectionWindow::showOutput(bool windowed, QScreen *screen) {
+  if (!screen) return;
+  hide();
+  setWindowFlag(Qt::FramelessWindowHint, true);
+  setWindowTitle(windowed ? "ChurchProjection - OBS Output" : "ChurchProjection - Projection Output");
+  winId();
+  if (!windowHandle()) return;
+  windowHandle()->setScreen(screen);
+  if (windowed) {
+    setWindowState(Qt::WindowNoState);
+    const QRect available = screen->availableGeometry();
+    QSize size(960, 540);
+    size.scale(available.size() * 0.8, Qt::KeepAspectRatio);
+    size = size.boundedTo(QSize(1280, 720));
+    setGeometry(QRect(available.center() - QPoint(size.width()/2, size.height()/2), size));
+    showNormal();
+  } else {
+    setGeometry(screen->geometry());
+    showFullScreen();
+  }
+  raise();
+}
+
+void ProjectionWindow::mousePressEvent(QMouseEvent *event) {
+  if (!isFullScreen() && event->button() == Qt::LeftButton && windowHandle()) {
+    const QPoint point = event->position().toPoint();
+    Qt::Edges edges;
+    if (point.x() < 10) edges |= Qt::LeftEdge;
+    if (point.x() >= width() - 10) edges |= Qt::RightEdge;
+    if (point.y() < 10) edges |= Qt::TopEdge;
+    if (point.y() >= height() - 10) edges |= Qt::BottomEdge;
+    if (edges) windowHandle()->startSystemResize(edges);
+    else windowHandle()->startSystemMove();
+    event->accept();
+    return;
+  }
+  QWidget::mousePressEvent(event);
+}
+
+void ProjectionWindow::closeEvent(QCloseEvent *event) {
+  event->ignore();
+  emit outputCloseRequested();
+}
+
+void ProjectionWindow::setLayerBrowser(int layer, QWidget *browser) {
+  if (!browser || layer < 0 || layer >= int(layers.size())) return;
+  if (liveBrowser != browser) {
+    releaseBrowser();
+    browserHome = browser->parentWidget();
+    liveBrowser = browser;
+    browser->setParent(this);
+  }
+  browserLayer = layer;
+  layers[layer]->contentPlayer->stop();
+  layers[layer]->mediaPlayer->pause();
+  browser->setMinimumSize(0, 0);
+  positionBrowser();
+  update();
+}
+
+void ProjectionWindow::releaseBrowser() {
+  if (!liveBrowser) return;
+  auto *browser = liveBrowser.data();
+  browser->hide();
+  browser->setParent(browserHome);
+  if (auto *splitter = qobject_cast<QSplitter *>(browserHome.data())) splitter->insertWidget(0, browser);
+  browser->setMinimumSize(300, 300);
+  browser->show();
+  liveBrowser.clear(); browserHome.clear();
+  emit browserReturned();
+  update();
+}
+
+void ProjectionWindow::positionBrowser() {
+  if (!liveBrowser) return;
+  QRect area = rect();
+  if (currentLayout == LayoutType::SplitVertical) {
+    int mid = width()/2;
+    area = QRect(browserLayer ? mid : 0, 0, browserLayer ? width()-mid : mid, height());
+  } else if (currentLayout == LayoutType::SplitHorizontal) {
+    int mid = height()/2;
+    area = QRect(0, browserLayer ? mid : 0, width(), browserLayer ? height()-mid : mid);
+  }
+  liveBrowser->setGeometry(Projection::stageContentRect(area, rect(), currentLayout, stageOverlay));
+  liveBrowser->setVisible(!blackout && (currentLayout != LayoutType::Single || browserLayer == 0));
+  liveBrowser->raise();
+}
 
 ProjectionWindow::ProjectionWindow(QWidget *parent) : QWidget(parent) {
   setWindowFlag(Qt::FramelessWindowHint);
@@ -76,6 +174,7 @@ void ProjectionWindow::setupLayer(int idx) {
 }
 
 void ProjectionWindow::setLayerText(int layerIdx, const QString &text) {
+  if (liveBrowser && browserLayer == layerIdx) releaseBrowser();
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   if (!text.isEmpty()) {
@@ -146,6 +245,7 @@ void ProjectionWindow::setLayerMedia(int layerIdx,
                                      Projection::Content::MediaType type,
                                      const QString &path, int page,
                                      const QImage &rendered) {
+  if (liveBrowser && browserLayer == layerIdx) releaseBrowser();
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
 
@@ -174,6 +274,7 @@ void ProjectionWindow::setLayoutType(LayoutType type) {
 }
 
 void ProjectionWindow::clearLayer(int layerIdx) {
+  if (liveBrowser && browserLayer == layerIdx) releaseBrowser();
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   LayerState *ls = layers[layerIdx];
@@ -226,6 +327,7 @@ void ProjectionWindow::onVideoFrameChanged(int layerIdx,
 }
 
 void ProjectionWindow::paintEvent(QPaintEvent *event) {
+  positionBrowser();
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing);
   painter.setRenderHint(QPainter::TextAntialiasing);
@@ -404,84 +506,19 @@ void ProjectionWindow::drawText(QPainter &painter, const Content &content,
   if (currentLayout != LayoutType::Single) {
     const bool preserveLines = preserveSplitLines(text);
     option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
-    // Fit both text blocks, then use the smaller result on both screens.
-    // Recomputed on every render so either side's edits resize the pair.
-    fontSize = 10000;
-    for (int i = 0; i < 2 && i < static_cast<int>(layers.size()); ++i) {
-      const Content &other = layers[i]->content;
-      if (other.text.isEmpty()) continue;
-      QRect area;
-      if (currentLayout == LayoutType::SplitVertical) {
-        const int mid = width() / 2;
-        area = QRect(i == 0 ? 0 : mid, 0, i == 0 ? mid : width() - mid, height());
-      } else {
-        const int mid = height() / 2;
-        area = QRect(0, i == 0 ? 0 : mid, width(), i == 0 ? mid : height() - mid);
-      }
-      area = Projection::stageContentRect(area, this->rect(), currentLayout, stageOverlay);
-      const int margin = other.formatting.margin;
-      const QSize available(qMax(1, area.width() - 2 * margin), qMax(1, area.height() - 2 * margin));
-      const int cap = qMax(1, qRound(150 * area.height() / 1080.0));
-      fontSize = qMin(fontSize, fitSplitText(other.text, other.formatting.fontFamily, available,
-                       cap, other.formatting.isScrolling, preserveSplitLines(other.text)));
-    }
-    if (fontSize == 10000) fontSize = 1;
-  } else if (fontSize <= 0) {
-    fontSize = 150; // Cap at 150px absolute max
-
-    if (fmt.isScrolling) {
-      int targetLines = 8;
-      int targetSize = rect.height() / targetLines;
-      if (targetSize < 40)
-        targetSize = 40;
-      if (targetSize > 120)
-        targetSize = 120;
-      fontSize = targetSize;
-    } else {
-      // Standard Auto-Fit Logic (Area Heuristic)
-      double rectArea = (double)rect.width() * rect.height();
-      if (text.length() > 0) {
-        int estSize = (int)sqrt(rectArea / (text.length() * 0.6));
-        if (estSize < fontSize)
-          fontSize = estSize;
-        if (fontSize > 150)
-          fontSize = 150;
-      }
-    }
-
-    if (fontSize < 20)
-      fontSize = 20;
-
-    // Iterative shrink
-    while (fontSize > 10) {
-      QFont font(fmt.fontFamily, fontSize, QFont::Bold);
-      painter.setFont(font);
-
-      QRectF boundingRect = painter.boundingRect(textRect, text, option);
-
-      bool fits = false;
-      if (fmt.isScrolling) {
-        if (boundingRect.width() <= textRect.width())
-          fits = true;
-      } else {
-        if (boundingRect.height() <= textRect.height() &&
-            boundingRect.width() <= textRect.width())
-          fits = true;
-      }
-
-      if (fits)
-        break;
-
-      fontSize -= 2;
-    }
-  }
-
-  // A configured font size is a ceiling, never permission to overflow.
-  // Fit authored lyric lines into the space reserved above the news bar.
-  if (currentLayout == LayoutType::Single) {
-    const bool preserveLines = preserveSplitLines(text);
-    option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
-    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(), qMax(1,fontSize), fmt.isScrolling, preserveLines);
+    // Each screen fits its own content; a longer verse on the other
+    // screen must not force this screen's shorter content to shrink.
+    const int cap = qMax(1, qRound(150 * rect.height() / 1080.0));
+    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(),
+                           cap, fmt.isScrolling, false);
+  } else {
+    // Fit wrapped text against the actual available area, without an
+    // estimate that prematurely shrinks long verses into a single line.
+    const int cap = qMax(1, qRound(150 * rect.height() / 1080.0));
+    const int requested = fmt.fontSize;
+    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(),
+                           requested > 0 ? qMin(requested, cap) : cap,
+                           fmt.isScrolling, false);
   }
   QFont font(fmt.fontFamily, fontSize, QFont::Bold);
   painter.setFont(font);

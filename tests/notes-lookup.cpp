@@ -1,12 +1,30 @@
 #include "ui/NotesWidget.h"
 #include "core/LyricFormatter.h"
 #include "core/SongLookup.h"
+#include "core/Song.h"
 #include <QApplication>
 #include <QEventLoop>
 #include <QPushButton>
 #include <QDebug>
 int main(int argc, char **argv) {
   QApplication app(argc, argv);
+  Song daily;
+  daily.title = "Test song"; daily.pinned = true;
+  daily.pinnedDate = QDate::currentDate();
+  if (!daily.isPinned()) qFatal("Today pin missing");
+  daily.pinnedDate = QDate::currentDate().addDays(-1);
+  if (daily.isPinned()) qFatal("Yesterday pin still visible");
+  daily.title = "Paybill";
+  if (!daily.isPinned()) qFatal("Always pinned item expired");
+  if (LyricFormatter::keepsPhrases("Nataka nimjue Yesu", "Nataka\nnimjue\nYesu\nMore\nabout\nJesus")) qFatal("Fragmented output accepted");
+  if (!LyricFormatter::keepsPhrases("Zaidi, zaidi (More, more)", "Zaidi, zaidi\nMore, more")) qFatal("Translation pair rejected");
+  const QString refrain = "Zaidi, zaidi\nNimfahamu Yesu\nNijue pendo lake na\nWokovu wake kamili";
+  const QString sections = "Zaidi, zaidi\nNimfahamu Yesu\n\nNijue pendo lake na\nWokovu wake kamili";
+  const QString paired = "Zaidi, zaidi\nMore, more\n\nNimfahamu Yesu\nMore about Jesus";
+  if (LyricFormatter::shortSections(paired) != paired) qFatal("Translation pairs changed");
+  if (LyricFormatter::shortSections(refrain) != sections) qFatal("Two-line sections not formed");
+  if (LyricFormatter::shortSections(sections) != sections) qFatal("Existing sections changed");
+  if (LyricFormatter::words(refrain) != LyricFormatter::words(sections)) qFatal("Section formatting changed lyrics");
   BibleManager::instance().loadBibles();
   NotesWidget notes;
   auto *editor = notes.findChild<QTextEdit *>();

@@ -405,73 +405,19 @@ void ProjectionPreview::drawText(QPainter &painter,
   if (currentLayout != LayoutType::Single) {
     const bool preserveLines = preserveSplitLines(text);
     option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
-    // Fit both text blocks, then use the smaller result on both screens.
-    // Recomputed on every render so either side's edits resize the pair.
-    fontSize = 10000;
-    for (int i = 0; i < 2 && i < static_cast<int>(layers.size()); ++i) {
-      const Content &other = layers[i]->content;
-      if (other.text.isEmpty()) continue;
-      QRect area;
-      if (currentLayout == LayoutType::SplitVertical) {
-        const int mid = width() / 2;
-        area = QRect(i == 0 ? 0 : mid, 0, i == 0 ? mid : width() - mid, height());
-      } else {
-        const int mid = height() / 2;
-        area = QRect(0, i == 0 ? 0 : mid, width(), i == 0 ? mid : height() - mid);
-      }
-      area = Projection::stageContentRect(area, this->rect(), currentLayout, stageOverlay);
-      const int margin = qMax(2, qRound(other.formatting.margin * area.height() / 1080.0));
-      const QSize available(qMax(1, area.width() - 2 * margin), qMax(1, area.height() - 2 * margin));
-      const int cap = qMax(1, qRound(150 * area.height() / 1080.0));
-      fontSize = qMin(fontSize, fitSplitText(other.text, other.formatting.fontFamily, available,
-                       cap, other.formatting.isScrolling, preserveSplitLines(other.text)));
-    }
-    if (fontSize == 10000) fontSize = 1;
-  } else if (fontSize <= 0) {
-    if (fmt.isScrolling) {
-      int targetLines = 8;
-      int targetSize = rect.height() / targetLines;
-      if (targetSize < (int)(15 * scaleFactor))
-        targetSize = (int)(15 * scaleFactor);
-      if (targetSize > (int)(60 * scaleFactor))
-        targetSize = (int)(60 * scaleFactor);
-      fontSize = targetSize;
-    } else {
-      int maxScaled = (int)(150 * scaleFactor);
-      fontSize = maxScaled;
-    }
-
-    // Auto-fit loop
-    while (fontSize > 4) {
-      QFont font(fmt.fontFamily, fontSize, QFont::Bold);
-      painter.setFont(font);
-      QRectF boundingRect = painter.boundingRect(textRect, text, option);
-
-      bool fits = false;
-      if (fmt.isScrolling) {
-        if (boundingRect.width() <= textRect.width())
-          fits = true;
-      } else {
-        if (boundingRect.height() <= textRect.height() &&
-            boundingRect.width() <= textRect.width())
-          fits = true;
-      }
-      if (fits)
-        break;
-      fontSize -= 1;
-    }
+    // Each screen fits its own content; a longer verse on the other
+    // screen must not force this screen's shorter content to shrink.
+    const int cap = qMax(1, qRound(150 * rect.height() / 1080.0));
+    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(),
+                           cap, fmt.isScrolling, false);
   } else {
-    fontSize = (int)(fontSize * scaleFactor);
-    if (fontSize < 4)
-      fontSize = 4;
-  }
-
-  // A configured font size is a ceiling, never permission to overflow.
-  // Fit authored lyric lines into the space reserved above the news bar.
-  if (currentLayout == LayoutType::Single) {
-    const bool preserveLines = preserveSplitLines(text);
-    option.setWrapMode(preserveLines ? QTextOption::NoWrap : QTextOption::WordWrap);
-    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(), qMax(1,fontSize), fmt.isScrolling, preserveLines);
+    // Fit wrapped text against the actual available area, without an
+    // estimate that prematurely shrinks long verses into a single line.
+    const int cap = qMax(1, qRound(150 * rect.height() / 1080.0));
+    const int requested = qRound(fmt.fontSize * scaleFactor);
+    fontSize = fitSplitText(text, fmt.fontFamily, textRect.size(),
+                           requested > 0 ? qMin(requested, cap) : cap,
+                           fmt.isScrolling, false);
   }
   QFont font(fmt.fontFamily, fontSize, QFont::Bold);
   painter.setFont(font);

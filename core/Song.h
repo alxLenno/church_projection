@@ -1,10 +1,12 @@
 #pragma once
 #include <QString>
+#include <QDate>
 #include <QStringList>
 #include <vector>
 
 struct Song {
   bool pinned = false;
+  QDate pinnedDate;
   qint64 lastUsed = 0;
   bool isCommonItem() const {
     return title.contains("paybill", Qt::CaseInsensitive) ||
@@ -12,7 +14,7 @@ struct Song {
            title.trimmed().compare("Offering", Qt::CaseInsensitive) == 0 ||
            title.trimmed().compare("offering tithe giving", Qt::CaseInsensitive) == 0;
   }
-  bool isPinned() const { return pinned || isCommonItem(); }
+  bool isPinned() const { return isCommonItem() || (pinned && pinnedDate == QDate::currentDate()); }
   QString title;
   QString artist;
   QStringList verses;
