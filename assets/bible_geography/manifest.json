@@ -1,0 +1,26 @@
+{
+  "places": {
+    "source": "OpenBible.info Bible Geocoding Data",
+    "sourceUrl": "https://github.com/openbibleinfo/Bible-Geocoding-Data",
+    "license": "CC BY 4.0",
+    "revision": "7eb18a5ee62f27b9b93bd6689ea272d76dd23b8f"
+  },
+  "land": {
+    "source": "Natural Earth 1:50m countries",
+    "sourceUrl": "https://www.naturalearthdata.com/",
+    "license": "Public domain",
+    "revision": "9380cca83db5f9aef52d5e762765100745f84b27"
+  },
+  "labels": {
+    "source": "Natural Earth 1:110m map labels",
+    "sourceUrl": "https://www.naturalearthdata.com/",
+    "license": "Public domain",
+    "revision": "ca96624a56bd078437bca8184e78163e5039ad19"
+  },
+  "transformations": [
+    "Best-supported coordinate retained for each mapped ancient place.",
+    "Bible references converted to canonical zero-based book indexes.",
+    "Medium-detail land polygons reduced to compact offline coordinates.",
+    "Country and populated-place labels reduced to compact map anchors."
+  ]
+}

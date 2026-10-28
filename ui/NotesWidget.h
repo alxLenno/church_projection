@@ -15,6 +15,7 @@ public:
 
 signals:
   void projectText(const QString &text);
+  void projectScripture(const QString &text,const QString &book,int chapter,int verse);
   void versionChanged(const QString &version);
 
 private slots:

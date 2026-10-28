@@ -17,6 +17,7 @@
 #include <QVideoSink>
 
 #include "../core/ProjectionContent.h"
+#include "../core/ObsSceneLayout.h"
 #include <vector>
 #include "../core/StageOverlay.h"
 #include <QElapsedTimer>
@@ -32,6 +33,36 @@ public:
   void setTextVisible(bool visible) { textVisible = visible; update(); }
   explicit ProjectionWindow(QWidget *parent = nullptr);
 
+  int obsContentBottom() const { return stageOverlay.enabled ? Projection::overlayRect(QRect(0,0,1920,1080),Projection::LayoutType::Single,stageOverlay).top() : 1080; }
+  void applyObsScene(const ObsSceneLayout &value) { obsScene=value; positionBrowser(); update(); }
+  ObsSceneLayout obsScene;
+  QImage renderObsScene(const ObsSceneLayout &scene, bool guides = false);
+  QStringList obsTextPages(const ObsSceneLayout &scene) const;
+  int obsTextPage(const ObsSceneLayout &scene) const;
+  bool advanceObsText(const ObsSceneLayout &scene,int direction);
+  void lastObsTextPage(const ObsSceneLayout &scene);
+  void setMapMode(int mode,int source=0,bool followReference=true);
+  void setMapReference(int source,const QStringList &ids,const QString &reference);
+  void focusMapPlace(const QString &id);
+  QRect mapOutputArea(int mode=-1) const;
+  void zoomMap(double factor);
+  void panMap(double dx,double dy);
+  void resetMapView();
+  void setMapAbove(bool above){mapAbove=above;if(mapLinked)focusMapPlace(mapPlace);else{mapCache.clear();update();}}
+  bool isMapAbove() const {return mapAbove;}
+  bool hasVisibleMap() const {return atlasMode>0 && (!mapLinked || !mapRelated.isEmpty());}
+  QStringList currentMapPlaces() const {return linkedMapIds[atlasSource];}
+  QString currentMapFocus() const {return mapPlace;}
+  QString currentMapReference() const {return linkedMapReferences[atlasSource];}
+  bool mapFollowsReference() const {return mapLinked;}
+
+  void setMapView(double lon,double lat,double span,const QString &place={},const QString &title={}){
+    mapLinked=false;mapRelated.clear();
+    mapLon=qBound(-180.0,lon,180.0);mapLat=qBound(-75.0,lat,75.0);mapSpan=qBound(0.05,span,180.0);mapPlace=place;atlasTitle=title;mapCache.clear();update();
+  }
+  int mapMode() const {return atlasMode;}
+  QImage renderMapOutput(int mode);
+  QImage normalFrame();
   QImage obsFrame();
   void showOutput(bool windowed, QScreen *screen);
   void setLayerBrowser(int layer, QWidget *browser);
@@ -78,6 +109,19 @@ private slots:
   void onVideoFrameChanged(int layerIdx, const QVideoFrame &frame);
 
 private:
+  double mapLon=35.23,mapLat=31.78,mapSpan=9;
+  QString mapPlace;
+  bool mapAbove=false;
+  bool mapLinked=false;
+  QStringList mapRelated,linkedMapIds[2];
+  QString linkedMapReferences[2];
+  bool linkedMapActive[2]={false,false};
+  QHash<QString,QImage> mapCache;
+  QString atlasTitle;
+  int atlasMode=0,atlasSource=0;
+  bool obsWindowMode = false;
+  QImage obsBackdrop;
+  QString obsBackdropPath;
   QPointer<QWidget> liveBrowser, browserHome;
   int browserLayer = 0;
   void positionBrowser();
@@ -100,10 +144,12 @@ private:
     float scrollOffset = 0.0f;
   };
 
+  int captionPage[2]={0,0};
   std::vector<LayerState *> layers;
   Projection::LayoutType currentLayout;
   QTimer *renderTimer; // To drive animation at 60fps
 
+  void drawNormalOutput(QPainter &painter,bool includeAtlas=true);
   void drawContent(QPainter &painter, int layerIdx, const QRect &rect,
                    bool drawBg = true);
   void drawBackground(QPainter &painter, int layerIdx, const QRect &rect);

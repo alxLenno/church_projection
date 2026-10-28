@@ -1,24 +1,200 @@
 #include "../core/SplitTextFit.h"
+#include "../core/ObsTextFit.h"
+#include "../core/BibleMap.h"
+#include <QAbstractTextDocumentLayout>
 #include "ProjectionWindow.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QTextOption>
+#include <QTextCursor>
+#include <QTextCharFormat>
 #include <QSplitter>
 #include <QWindow>
 
 using namespace Projection;
 
-QImage ProjectionWindow::obsFrame() {
-  // QWidget::render paints even when the native window is fully covered.
-  QImage image(size(), QImage::Format_RGB32);
-  image.fill(Qt::black);
-  render(&image, QPoint(), QRegion(), QWidget::DrawWindowBackground | QWidget::DrawChildren);
+QStringList ProjectionWindow::obsTextPages(const ObsSceneLayout &scene) const {
+  const auto &content=layers[qBound(0,scene.source,1)]->content;
+  if(!scene.transparent || !scene.captionPaging)return {content.text};
+  QRect area=scene.text.adjusted(scene.padding,scene.padding,-scene.padding,-scene.padding);
+  if(scene.banner && stageOverlay.enabled)area.setBottom(qMin(area.bottom(),obsContentBottom()-1));
+  return obsCaptionPages(content.text,QFont(content.formatting.fontFamily,scene.outputTextSize(),QFont::Bold),area.size(),scene.outputTextSize());
+}
+int ProjectionWindow::obsTextPage(const ObsSceneLayout &scene) const {
+  return qBound(0,captionPage[qBound(0,scene.source,1)],obsTextPages(scene).size()-1);
+}
+bool ProjectionWindow::advanceObsText(const ObsSceneLayout &scene,int direction){
+  if(!scene.transparent)return false;
+  const int current=obsTextPage(scene),next=current+direction;
+  if(next<0 || next>=obsTextPages(scene).size())return false;
+  captionPage[qBound(0,scene.source,1)]=next;update();return true;
+}
+void ProjectionWindow::lastObsTextPage(const ObsSceneLayout &scene){
+  captionPage[qBound(0,scene.source,1)]=qMax(0,obsTextPages(scene).size()-1);update();
+}
+
+QImage ProjectionWindow::renderObsScene(const ObsSceneLayout &scene, bool guides) {
+  QImage image(1920,1080,scene.transparent?QImage::Format_ARGB32_Premultiplied:QImage::Format_RGB32);
+  image.fill(scene.transparent?QColor(Qt::transparent):scene.background);
+  QPainter painter(&image); painter.setRenderHint(QPainter::Antialiasing); painter.setRenderHint(QPainter::TextAntialiasing);
+  if (blackout && !guides) return image;
+  if (obsBackdropPath != scene.backgroundImage) { obsBackdropPath=scene.backgroundImage;obsBackdrop=QImage(obsBackdropPath); }
+  if (!scene.transparent && !obsBackdrop.isNull()) {
+    QSize size=obsBackdrop.size();size.scale(image.size(),Qt::KeepAspectRatioByExpanding);
+    painter.drawImage(QRect(image.rect().center()-QPoint(size.width()/2,size.height()/2),size),obsBackdrop);
+  }
+  if(!scene.transparent){
+  painter.fillRect(scene.phone,scene.panel);
+  painter.fillRect(scene.text,scene.panel);
+  painter.setPen(QPen(scene.accent,scene.border));
+  if (scene.border) { painter.drawRect(scene.phone); painter.drawRect(scene.text); }
+  }
+  const auto &content=layers[qBound(0,scene.source,1)]->content;
+  QRect textArea=scene.text.adjusted(scene.padding,scene.padding,-scene.padding,-scene.padding);
+  if (scene.banner && stageOverlay.enabled) textArea.setBottom(qMin(textArea.bottom(),obsContentBottom()-1));
+  if(scene.transparent && !scene.captionPaging && textArea.width()>0){
+    // Grow upwards rather than hiding the rest of the selected section.
+    QTextDocument measure;
+    fitObsText(measure,content.text,QFont(content.formatting.fontFamily,scene.outputTextSize(),QFont::Bold),QSize(textArea.width(),1080),scene.outputTextSize());
+    const int wanted=qCeil(measure.size().height())+8;
+    const int available=textArea.bottom()-qMin(textArea.top(),432)+1;
+    textArea.setTop(textArea.bottom()-qMin(available,qMax(textArea.height(),wanted))+1);
+  }
+  if (textArea.width()>0 && textArea.height()>0) {
+    painter.save();painter.setClipRect(scene.transparent?textArea.adjusted(-14,-8,14,8):textArea);
+    if (!scene.transparent && content.mediaType != Content::MediaType::None) {
+      QImage media = content.mediaType==Content::MediaType::Video ? layers[scene.source]->contentFrame.toImage() : content.renderedMedia;
+      if (!media.isNull()) { QSize size=media.size();size.scale(textArea.size(),Qt::KeepAspectRatio);painter.drawImage(QRect(textArea.center()-QPoint(size.width()/2,size.height()/2),size),media); }
+    }
+    if (textVisible || guides) {
+      QString words=content.text.isEmpty() && guides ? QString("Lyrics / scripture preview\nSelected content appears here") : content.text;
+      if(scene.transparent && !content.text.isEmpty())words=obsTextPages(scene).value(obsTextPage(scene));
+      QTextDocument document;
+      fitObsText(document,words,QFont(content.formatting.fontFamily,scene.outputTextSize(),QFont::Bold),textArea.size(),scene.outputTextSize());
+      QAbstractTextDocumentLayout::PaintContext context;
+      context.palette.setColor(QPalette::Text,scene.foreground);
+      painter.translate(textArea.left(),textArea.top()+qMax(0.0,(textArea.height()-document.size().height())/(scene.transparent?1:2)));
+      if(scene.transparent){
+        if(scene.captionBacking>0 && !words.trimmed().isEmpty()){
+          const QColor backing(0,0,0,qRound(255*scene.captionBacking/100.0));
+          painter.fillRect(QRectF(-14,-8,textArea.width()+28,document.size().height()+16),backing);
+        }
+        // Stroke the glyphs themselves so diagonal edges have the same
+        // contrast as vertical edges, including over bright camera footage.
+        QTextCursor cursor(&document);cursor.select(QTextCursor::Document);
+        QTextCharFormat outline;
+        QPen pen(Qt::black,8,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin);
+        outline.setTextOutline(pen);cursor.mergeCharFormat(outline);
+        context.palette.setColor(QPalette::Text,Qt::black);
+        painter.save();painter.translate(4,6);painter.setOpacity(0.8);
+        document.documentLayout()->draw(&painter,context);painter.restore();
+        context.palette.setColor(QPalette::Text,scene.foreground);
+        document.documentLayout()->draw(&painter,context);
+        // Paint a clean fill over the inner half of the stroke so the
+        // stronger outline does not consume the white letter interiors.
+        outline.setTextOutline(QPen(Qt::NoPen));cursor.mergeCharFormat(outline);
+      }
+      document.documentLayout()->draw(&painter,context);
+    }
+    painter.restore();
+  }
+  if (!scene.title.isEmpty()) {
+    painter.setPen(scene.foreground);QFont font("Arial");font.setPixelSize(38);font.setBold(true);painter.setFont(font);
+    painter.drawText(QRect(64,20,1792,64),Qt::AlignCenter,scene.title);
+  }
+  if (scene.banner) Projection::drawStageOverlay(painter,image.rect(),LayoutType::Single,stageOverlay,overlayClock.isValid()?overlayClock.elapsed():0);
+  if (guides && !scene.transparent) {
+    painter.setPen(scene.foreground);QFont font("Arial");font.setPixelSize(30);painter.setFont(font);
+    painter.drawText(scene.phone.adjusted(12,12,-12,-12),Qt::AlignCenter|Qt::TextWordWrap,"PHONE / CAMERA\nReserved area — phone remains in OBS");
+  }
   return image;
+}
+
+void ProjectionWindow::setMapMode(int mode,int source,bool followReference){
+  atlasMode=qBound(0,mode,2);atlasSource=qBound(0,source,1);
+  if(followReference && linkedMapActive[atlasSource])focusMapPlace({});
+  else if(!followReference)mapLinked=false;
+  positionBrowser();update();
+}
+void ProjectionWindow::setMapReference(int source,const QStringList &ids,const QString &reference){
+  source=qBound(0,source,1);linkedMapIds[source]=ids;linkedMapReferences[source]=reference;linkedMapActive[source]=true;
+  atlasSource=source;focusMapPlace({});positionBrowser();update();
+}
+void ProjectionWindow::focusMapPlace(const QString &id){
+  const auto ids=linkedMapIds[atlasSource];
+  const auto frame=BibleMap::instance().framePlaces(id.isEmpty()?ids:QStringList{id});
+  mapLon=frame.lon;mapLat=frame.lat;
+  const auto area=mapOutputArea(atlasMode==0?1:atlasMode);
+  const double aspect=double(area.width())/qMax(1,area.height());
+  mapSpan=qMin(180.0,frame.span*qMax(1.0,aspect/1.8));mapRelated=ids;
+  mapPlace=id.isEmpty() && ids.size()==1?ids.first():id;
+  mapLinked=true;atlasTitle=linkedMapReferences[atlasSource];
+  if(const auto *place=BibleMap::instance().find(mapPlace))atlasTitle=place->name+" · "+atlasTitle;
+  mapCache.clear();update();
+}
+
+QRect ProjectionWindow::mapOutputArea(int mode) const {
+  if(mode<0)mode=atlasMode;
+  const int bottom=stageOverlay.enabled?obsContentBottom():1080;
+  if(mode==1 && mapAbove)return QRect(24,70,1872,qMax(1,qRound((bottom-124)*0.56)));
+  return QRect(24,70,mode==1?1000:1872,qMax(1,bottom-124));
+}
+void ProjectionWindow::zoomMap(double factor){mapSpan=qBound(0.05,mapSpan*factor,180.0);mapCache.clear();update();}
+void ProjectionWindow::panMap(double dx,double dy){
+  mapLon-=dx*mapSpan;while(mapLon>180)mapLon-=360;while(mapLon< -180)mapLon+=360;
+  mapLat=qBound(-75.0,BibleMap::latitude(BibleMap::mercator(mapLat)+dy*mapSpan),75.0);mapCache.clear();update();
+}
+void ProjectionWindow::resetMapView(){
+  if(mapLinked)focusMapPlace(currentMapFocus());
+  else {mapSpan=9;mapCache.clear();update();}
+}
+
+QImage ProjectionWindow::renderMapOutput(int mode){
+  QImage image(1920,1080,QImage::Format_RGB32);image.fill(QColor("#101827"));
+  QPainter painter(&image);painter.setRenderHint(QPainter::SmoothPixmapTransform);
+  painter.setRenderHint(QPainter::TextAntialiasing);
+  if(blackout)return image;
+  if(mode==0){painter.scale(1920.0/qMax(1,width()),1080.0/qMax(1,height()));drawNormalOutput(painter,false);return image;}
+  if(mapLinked && mapRelated.isEmpty()){
+    if(mode==1){painter.end();return renderMapOutput(0);}
+    QFont font("Arial");font.setPixelSize(40);painter.setFont(font);painter.setPen(Qt::white);
+    painter.drawText(image.rect().adjusted(80,80,-80,-80),Qt::AlignCenter|Qt::TextWordWrap,
+      linkedMapReferences[atlasSource].isEmpty()?"No scripture reference selected — project a verse from Bible or Notes":linkedMapReferences[atlasSource]+"\n\nNo location is linked to this verse in the bundled map data");
+    return image;
+  }
+  const int bottom=stageOverlay.enabled?obsContentBottom():1080;
+  const QRect mapArea=mapOutputArea(mode);
+  const QString key=QString::number(mapArea.width())+"x"+QString::number(mapArea.height());
+  if(!mapCache.contains(key))mapCache.insert(key,BibleMap::instance().render(mapArea.size(),mapLon,mapLat,mapSpan,mapPlace,mapRelated));
+  painter.drawImage(mapArea,mapCache.value(key));
+  painter.setPen(Qt::white);QFont heading("Arial");heading.setPixelSize(32);heading.setBold(true);painter.setFont(heading);
+  painter.drawText(QRect(24,12,1872,48),Qt::AlignCenter,atlasTitle.isEmpty()?"Offline Bible map":atlasTitle);
+  if(mode==1 && textVisible){
+    const auto &content=layers[atlasSource]->content;
+    QRect area=mapAbove?QRect(44,mapArea.bottom()+26,1832,qMax(1,bottom-mapArea.bottom()-90)):QRect(1060,90,820,qMax(1,bottom-170));
+    QTextDocument doc;fitObsText(doc,content.text,QFont(content.formatting.fontFamily,110,QFont::Bold),area.size(),110);
+    QAbstractTextDocumentLayout::PaintContext context;context.palette.setColor(QPalette::Text,Qt::white);
+    painter.save();painter.setClipRect(area);painter.translate(area.left(),area.top()+qMax(0.0,(area.height()-doc.size().height())/2));doc.documentLayout()->draw(&painter,context);painter.restore();
+  }
+  QFont credits("Arial");credits.setPixelSize(18);painter.setFont(credits);painter.setPen(QColor("#cbd5e1"));
+  painter.drawText(QRect(24,bottom-42,1872,30),Qt::AlignCenter,"Places: OpenBible.info (CC BY 4.0) · Geography: Natural Earth (public domain) · Locations may be uncertain; geography provides modern context");
+  Projection::drawStageOverlay(painter,image.rect(),LayoutType::Single,stageOverlay,overlayClock.isValid()?overlayClock.elapsed():0);
+  return image;
+}
+
+QImage ProjectionWindow::normalFrame() {
+  QImage image(size(),QImage::Format_RGB32);image.fill(Qt::black);
+  QPainter painter(&image);drawNormalOutput(painter);return image;
+}
+
+QImage ProjectionWindow::obsFrame() {
+  return atlasMode>0 ? renderMapOutput(atlasMode) : obsScene.enabled ? renderObsScene(obsScene) : normalFrame();
 }
 
 void ProjectionWindow::showOutput(bool windowed, QScreen *screen) {
   if (!screen) return;
   hide();
+  obsWindowMode = windowed;
   setWindowFlag(Qt::FramelessWindowHint, true);
   setWindowTitle(windowed ? "ChurchProjection - OBS Output" : "ChurchProjection - Projection Output");
   winId();
@@ -91,6 +267,7 @@ void ProjectionWindow::releaseBrowser() {
 
 void ProjectionWindow::positionBrowser() {
   if (!liveBrowser) return;
+  if (atlasMode>0 || (obsWindowMode && obsScene.enabled)) { liveBrowser->hide(); return; }
   QRect area = rect();
   if (currentLayout == LayoutType::SplitVertical) {
     int mid = width()/2;
@@ -183,6 +360,11 @@ void ProjectionWindow::setLayerText(int layerIdx, const QString &text) {
     layers[layerIdx]->content.mediaType = Content::MediaType::None;
     layers[layerIdx]->content.renderedMedia = QImage();
   }
+  if(linkedMapActive[layerIdx]){
+    linkedMapIds[layerIdx].clear();linkedMapReferences[layerIdx].clear();
+    if(atlasSource==layerIdx)focusMapPlace({});
+  }
+  captionPage[layerIdx]=0;
   layers[layerIdx]->content.text = text;
   update();
 }
@@ -336,7 +518,23 @@ void ProjectionWindow::paintEvent(QPaintEvent *event) {
   // Always fill with black first
   painter.fillRect(rect(), Qt::black);
   if (blackout) return;
+  if (obsWindowMode && obsScene.enabled && atlasMode==0) {
+    const QImage scene=renderObsScene(obsScene);
+    QSize size=scene.size();size.scale(this->size(),Qt::KeepAspectRatio);
+    painter.drawImage(QRect(rect().center()-QPoint(size.width()/2,size.height()/2),size),scene);
+    return;
+  }
 
+  drawNormalOutput(painter);
+}
+
+void ProjectionWindow::drawNormalOutput(QPainter &painter,bool includeAtlas) {
+  if(includeAtlas && atlasMode>0){painter.drawImage(rect(),renderMapOutput(atlasMode));return;}
+  painter.setRenderHint(QPainter::Antialiasing);
+  painter.setRenderHint(QPainter::TextAntialiasing);
+  painter.setRenderHint(QPainter::SmoothPixmapTransform);
+  painter.fillRect(rect(),Qt::black);
+  if(blackout)return;
   if (currentLayout == LayoutType::Single) {
     // Standard Single Layer
     drawContent(painter, 0, rect(), true); // true = draw background

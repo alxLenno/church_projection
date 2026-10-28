@@ -56,6 +56,8 @@ private:
   QLabel *contentLabel;
 };
 
+class LocalObsFeed;
+
 class ControlWindow : public QMainWindow {
   Q_OBJECT
 public:
@@ -84,7 +86,8 @@ private slots:
 
   // Projection
   void projectVerse(int index);
-  void projectBibleVerse(const QString &text);
+  void projectBibleVerse(const QString &text,const QString &book={},int chapter=0,int verse=0);
+  QWidget *createScriptureMapControls();
   void nextVerse();
   void prevVerse();
   void onClearTextClicked();
@@ -208,6 +211,8 @@ private:
 
   // -- Media Tab --
   void setupMediaTab(QWidget *container);
+  void setupMapsTab(QWidget *container);
+  LocalObsFeed *mapObsFeed=nullptr;
   void addMediaFile();
   void removeMediaFile();
   void onMediaFileSelected(QListWidgetItem *item);

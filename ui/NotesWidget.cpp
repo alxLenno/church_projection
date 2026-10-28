@@ -1,5 +1,7 @@
 #include "NotesWidget.h"
 #include "../core/BibleManager.h"
+#include "../core/BibleGeography.h"
+#include "../core/LocationIndicator.h"
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QDebug>
@@ -186,8 +188,15 @@ void NotesWidget::showResults(const std::vector<BibleVerse> &results, const QStr
                         .arg(verse.text);
 
     QListWidgetItem *item = new QListWidgetItem(label);
+    const auto ref=geographyReference(verse.book,verse.chapter,verse.verse);
+    const auto ids=BibleMap::instance().linkedPlaces(ref.book,verse.chapter,verse.verse);
+    if(!ids.isEmpty()){
+      item->setIcon(locationPinIcon());QStringList names;for(const auto &id:ids)if(const auto *place=BibleMap::instance().find(id))names.append(place->name);
+      item->setToolTip("Linked locations: "+names.join(", "));
+    }
     // Store text to project
     item->setData(Qt::UserRole, verse.text);
+    item->setData(Qt::UserRole+2,QVariantMap{{"book",verse.book},{"chapter",verse.chapter},{"verse",verse.verse}});
     item->setData(Qt::UserRole + 1, QString("%1 %2:%3 (%4)")
                                         .arg(displayBook)
                                         .arg(verse.chapter)
@@ -205,7 +214,8 @@ void NotesWidget::onResultClicked(QListWidgetItem *item) {
 
   // Formatting for projection
   QString projectionText = QString("%1\n\n%2").arg(verseText, verseRef);
-  emit projectText(projectionText);
+  const auto identity=item->data(Qt::UserRole+2).toMap();
+  emit projectScripture(projectionText,identity.value("book").toString(),identity.value("chapter").toInt(),identity.value("verse").toInt());
 }
 
 void NotesWidget::onProjectNoteClicked() {

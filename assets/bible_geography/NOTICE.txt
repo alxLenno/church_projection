@@ -1,0 +1,23 @@
+Offline Bible geography bundled from BiAY.
+
+Bible place data: OpenBible.info Bible Geocoding Data, CC BY 4.0.
+https://github.com/openbibleinfo/Bible-Geocoding-Data
+https://creativecommons.org/licenses/by/4.0/
+Source revision and upstream transformations: manifest.json.
+
+Land, rivers, lakes and context labels: Natural Earth, public domain.
+https://www.naturalearthdata.com/
+Detailed physical sources and coverage: physical_sources.json.
+
+ChurchProjection packaging changes: gzip JSON assets expanded into JSON and
+embedded as Qt resources, including all 66 canonical book-to-place indexes.
+BiAY offline-map styling and label hierarchy adapted for Qt. Display uses
+Mercator projection, search, coordinate
+entry, label collision avoidance, and selected-place highlighting. No network
+map service is required. Artwork from the separate BiAY biblical_atlas pack
+is not included in this coordinate-map bundle.
+
+Ancient place identifications can be uncertain. Low-confidence labels carry a
+question mark. Geographic features provide modern context, not reconstructed
+ancient coastlines, political boundaries or water levels. No endorsement by
+the data providers is implied.

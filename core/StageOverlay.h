@@ -20,13 +20,13 @@ struct StageOverlay {
   int fontSize = 36;
   QColor foreground = Qt::white;
   QColor background = QColor(15, 23, 42, 230);
-  int x = 0, y = 90, width = 100, height = 10; // Percent of selected screen
+  int x = 0, y = 92, width = 100, height = 8; // Percent of selected screen
   int speed = 80; // Pixels per second at 1080p
   int screen = -1; // -1 spans both sides
 };
 inline QRect overlayRect(const QRect &stage, LayoutType layout, const StageOverlay &overlay) {
   if (overlay.newsStyle) {
-    const int height = qBound(6, overlay.height, 30);
+    const int height = qBound(3, overlay.height, 30);
     const int top = 100-height;
     return QRect(stage.left(),stage.top()+stage.height()*top/100,stage.width(),stage.height()*height/100);
   }
@@ -57,7 +57,7 @@ inline void drawNewsStageOverlay(QPainter &painter, const QRect &stage, LayoutTy
   const bool hasTitle = !overlay.title.trimmed().isEmpty(), hasHeadline = !overlay.headline.trimmed().isEmpty();
   const int first = hasTitle ? bar.height()*(hasHeadline ? 27 : 45)/100 : 0;
   const int second = hasHeadline ? bar.height()*(hasTitle ? 43 : 65)/100 : 0;
-  QFont titleFont(overlay.font); titleFont.setBold(true);titleFont.setPixelSize(qMax(1,first*68/100));
+  QFont titleFont(overlay.font); titleFont.setBold(true);titleFont.setPixelSize(qMax(1,qMin(first*68/100,qRound(overlay.fontSize*stage.height()/1080.0))));
   const int titleWidth=qMin(bar.width(),qMax(bar.width()*18/100,qRound(QFontMetricsF(titleFont).horizontalAdvance(overlay.title))+first/2));
   const QRect titleRect(bar.left(), bar.top(), titleWidth, first);
   const QRect headlineRect(bar.left(), bar.top()+first, bar.width(), second);
@@ -73,7 +73,7 @@ inline void drawNewsStageOverlay(QPainter &painter, const QRect &stage, LayoutTy
     const int pad = qMax(2, box.height()/8);
     box.adjust(pad,0,-pad,0);
     QFont font(overlay.font); font.setBold(true);
-    font.setPixelSize(qMax(1,box.height()*68/100));
+    font.setPixelSize(qMax(1,qMin(box.height()*68/100,qRound(overlay.fontSize*stage.height()/1080.0))));
     while (font.pixelSize()>1 && (QFontMetricsF(font).horizontalAdvance(text)>box.width() || QFontMetricsF(font).height()>box.height())) font.setPixelSize(font.pixelSize()-1);
     painter.setFont(font); painter.setPen(fg);
     painter.drawText(box,Qt::AlignVCenter|(centered?Qt::AlignHCenter:Qt::AlignLeft),text);
@@ -88,7 +88,7 @@ inline void drawNewsStageOverlay(QPainter &painter, const QRect &stage, LayoutTy
     const int pad = qMax(2,tickerRect.height()/8);
     const QRect area=tickerRect.adjusted(pad,0,-pad,0);
     QString text=overlay.text; text.replace('\n',"   •   ");
-    QFont font(overlay.font); font.setPixelSize(qMax(1,qMin(qMax(qRound(overlay.fontSize*stage.height()/1080.0),tickerRect.height()*55/100),tickerRect.height()*65/100)));
+    QFont font(overlay.font); font.setPixelSize(qMax(1,qMin(qRound(overlay.fontSize*stage.height()/1080.0),tickerRect.height()*65/100)));
     painter.setFont(font); painter.setPen(overlay.foreground);
     const QFontMetricsF fm(font);
     const qreal span=qMax(1.0,fm.horizontalAdvance(text)+area.width());

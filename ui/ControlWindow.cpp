@@ -1,4 +1,12 @@
 #include "ControlWindow.h"
+#include "ObsSceneEditor.h"
+#include "BibleMapPreview.h"
+#include "OutputMapPreview.h"
+#include "ScriptureViewSelector.h"
+#include "../core/LocationIndicator.h"
+#include "../core/BibleMap.h"
+#include "../core/BibleGeography.h"
+#include <QDoubleSpinBox>
 #include "../core/LocalObsFeed.h"
 #include "../core/BrowserVideoLayout.h"
 #include <QClipboard>
@@ -522,7 +530,15 @@ VerseWidget::VerseWidget(const QString &book, int chapter, int verse,
   contentLabel->setStyleSheet(
       "color: white; font-size: 16px; background: transparent; "
       "selection-background-color: #38bdf8;");
-  layout->addWidget(contentLabel);
+  auto *textRow=new QHBoxLayout();textRow->setContentsMargins(0,0,0,0);textRow->setSpacing(5);
+  const auto reference=geographyReference(book,chapter,verse);
+  const auto ids=BibleMap::instance().linkedPlaces(reference.book,chapter,verse);
+  if(!ids.isEmpty()){
+    auto *pin=new QLabel;pin->setObjectName("verseLocationPin");pin->setPixmap(locationPinIcon().pixmap(18,18));pin->setFixedSize(20,20);pin->setAttribute(Qt::WA_TransparentForMouseEvents);
+    QStringList names;for(const auto &id:ids)if(const auto *place=BibleMap::instance().find(id))names.append(place->name);
+    pin->setToolTip("Linked locations: "+names.join(", "));textRow->addWidget(pin,0,Qt::AlignTop);
+  }
+  textRow->addWidget(contentLabel,1);layout->addLayout(textRow);
 
   // No stretch here to keep verses compact
 
@@ -797,12 +813,16 @@ void ControlWindow::setupMainWorkspace(QWidget *container) {
   notesWidget = new NotesWidget(this);
   connect(notesWidget, &NotesWidget::projectText, this,
           &ControlWindow::onNotesProject);
+  connect(notesWidget,&NotesWidget::projectScripture,this,[this](const QString &text,const QString &book,int chapter,int verse){projectBibleVerse(text,book,chapter,verse);});
+  if(auto *notesLayout=qobject_cast<QVBoxLayout *>(notesWidget->layout()))notesLayout->insertWidget(0,createScriptureMapControls());
   mainTabWidget->addTab(notesWidget, "Notes");
 
   // --- Tab 4: Media (PDF/Images) ---
   auto *mediaTab = new QWidget();
   setupMediaTab(mediaTab);
   mainTabWidget->addTab(mediaTab, "Media");
+
+  auto *mapsTab=new QWidget();setupMapsTab(mapsTab);mainTabWidget->addTab(mapsTab,"Maps");
 
   // --- Tab 5: Browser (Lyrics Search) ---
   auto *browserTab = new QWidget();
@@ -861,6 +881,7 @@ void ControlWindow::setupBibleTab(QWidget *container) {
   navLayout->addLayout(searchLayout);
 
   layout->addWidget(navContainer);
+  layout->addWidget(createScriptureMapControls());
 
   // Vertical Splitter: Top (Content) | Bottom (Navigation)
   bibleSplitter = new QSplitter(Qt::Vertical);
@@ -1204,6 +1225,7 @@ void ControlWindow::onChapterSelected(int chapter) {
                         .arg(v.verse)
                         .arg(v.version);
       item->setData(Qt::UserRole + 1, ref);
+      item->setData(Qt::UserRole+2,QVariantMap{{"book",v.book},{"chapter",v.chapter},{"verse",v.verse}});
 
       connect(widget, &VerseWidget::versionChanged,
               [item, v](const QString &newVer, const QString &newText) {
@@ -1576,12 +1598,23 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   layout->setSpacing(6);
 
   // 1. Live Preview
-  auto *previewGroup = new QGroupBox("LIVE PREVIEW");
+  auto *previewGroup = new QGroupBox("OUTPUT PREVIEW");
   previewGroup->setMaximumHeight(220);
   auto *prevLayout = new QVBoxLayout(previewGroup);
   prevLayout->setContentsMargins(0, 4, 0, 0);
   preview = new ProjectionPreview(this);
-  prevLayout->addWidget(preview);
+  auto *previewStack=new QStackedWidget();previewStack->addWidget(preview);
+  auto *obsPreview=new OutputMapPreview(projection);obsPreview->layoutChanged=[](bool above){QSettings().setValue("Projection/MapAbove",above);};obsPreview->setMinimumSize(160,90);previewStack->addWidget(obsPreview);
+  prevLayout->addWidget(previewStack);
+  auto refreshObs=[this,obsPreview,previewStack,previewGroup]{
+    const bool maps=projection->mapMode()>0;
+    const bool obs=outputModeCombo && outputModeCombo->currentData().toBool();
+    previewGroup->setTitle(maps?"MAP OUTPUT PREVIEW":obs?"OBS OUTPUT PREVIEW":"PROJECTOR PREVIEW");
+    previewStack->setCurrentIndex(maps || obs?1:0);
+    if(previewStack->currentWidget()!=obsPreview)return;
+    obsPreview->refresh();
+  };
+  auto *obsPreviewTimer=new QTimer(this);connect(obsPreviewTimer,&QTimer::timeout,this,refreshObs);obsPreviewTimer->start(200);
   layout->addWidget(previewGroup); // No stretch — capped height
 
   // 2. Master Controls — Modern Stage Panel
@@ -1779,7 +1812,10 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   outputModeCombo->setToolTip("OBS captures the named output window. Keep it open while switching back to the dashboard.");
   settingsGrid->addWidget(new QLabel("Output"), 3, 0);
   settingsGrid->addWidget(outputModeCombo, 3, 1);
-  connect(outputModeCombo, &QComboBox::currentIndexChanged, this, [this](int index) {
+  auto syncPreview=[=]{const bool obs=outputModeCombo->currentData().toBool();previewGroup->setTitle(obs ? "OBS OUTPUT PREVIEW" : "PROJECTOR PREVIEW");previewStack->setCurrentIndex(obs ? 1 : 0);refreshObs();};
+  syncPreview();
+  connect(outputModeCombo, &QComboBox::currentIndexChanged, this, [this,syncPreview](int index) {
+    syncPreview();
     const bool windowed = outputModeCombo->itemData(index).toBool();
     QSettings().setValue("Projection/WindowedOutput", windowed);
     if (isPresenting) {
@@ -1790,20 +1826,103 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   connect(projection, &ProjectionWindow::outputCloseRequested, this, [this] {
     if (isPresenting) togglePresentation();
   });
+  projection->setMapAbove(QSettings().value("Projection/MapAbove",false).toBool());
+  projection->setMapMode(qBound(0,QSettings().value("Projection/ScriptureMapMode",0).toInt(),2),currentTargetLayer);
+  projection->applyObsScene(ObsSceneLayout::fromJson(QJsonDocument::fromJson(QSettings().value("OBS/SceneLayout").toByteArray()).object()));
+  auto *sceneEditor=new QPushButton("OBS Scene Layout…");
+  settingsGrid->addWidget(sceneEditor,5,0,1,2);
   auto *obsFeed = new LocalObsFeed([this] {
     if (isPresenting) return projection->obsFrame();
     QImage black(1280, 720, QImage::Format_RGB32); black.fill(Qt::black); return black;
   }, this);
-  auto *copyFeed = new QPushButton("Copy OBS Browser URL");
-  copyFeed->setToolTip("Add this URL as an OBS Browser source at 1920 × 1080. Carries lyrics, scripture, banners and local media pictures; audio and embedded browser video use separate OBS sources.");
-  connect(copyFeed, &QPushButton::clicked, this, [this, obsFeed] {
-    if (!obsFeed->start()) {
-      QMessageBox::warning(this, "OBS feed", "Cannot start the local OBS feed. Close other ChurchProjection instances and try again."); return;
-    }
-    QApplication::clipboard()->setText(obsFeed->url());
-    QMessageBox::information(this, "OBS Browser source", "The local feed URL has been copied.\n\nIn OBS add Browser, paste the URL, and set Width 1920 / Height 1080. Hide the old macOS Screen Capture source.\n\nKeep GO LIVE on. The feed refreshes even when the output window is covered. Audio and embedded browser videos should be separate OBS sources.");
+  mapObsFeed=obsFeed;
+  for(const auto &entry:QList<QPair<QString,int>>{{"maps/verse-only",0},{"maps/map-and-verse",1},{"maps/map-only",2}}){
+    obsFeed->setRenderer(entry.first,[this,mode=entry.second]{
+      if(isPresenting)return projection->renderMapOutput(mode);
+      QImage black(1920,1080,QImage::Format_RGB32);black.fill(Qt::black);return black;
+    });
+  }
+  obsFeed->setNormalRenderer([this]{
+    if(isPresenting)return projection->normalFrame();
+    QImage image(1920,1080,QImage::Format_RGB32);image.fill(Qt::black);return image;
   });
-  settingsGrid->addWidget(copyFeed, 4, 0, 1, 2);
+  obsFeed->setFormattedRenderer([this]{
+    if(isPresenting)return projection->renderObsScene(projection->obsScene);
+    QImage image(1920,1080,projection->obsScene.transparent?QImage::Format_ARGB32_Premultiplied:QImage::Format_RGB32);image.fill(projection->obsScene.transparent?QColor(Qt::transparent):QColor(Qt::black));return image;
+  });
+  auto addFeedButton=[this,obsFeed,settingsGrid](const QString &label,const QString &endpoint,int row){
+    auto *button=new QPushButton(label);
+    button->setToolTip("Independent OBS Browser source. Set Width 1920 / Height 1080. Audio is a separate source.");
+    settingsGrid->addWidget(button,row,0,1,2);
+    connect(button,&QPushButton::clicked,this,[this,obsFeed,endpoint]{
+      if(!obsFeed->start()) {QMessageBox::warning(this,"OBS feed","Cannot start the local feed. Close other app copies and try again.");return;}
+      QApplication::clipboard()->setText(obsFeed->url(endpoint));
+      QMessageBox::information(this,"OBS Browser URL copied",endpoint=="normal" ?
+        "Normal output URL copied. Add it as an OBS Browser source (1920 × 1080). It stays normal even when the formatted scene is active. Keep GO LIVE on; audio remains separate." :
+        "Formatted OBS output URL copied. Add it as a separate OBS Browser source (1920 × 1080). For transparent text overlays, place this source above your full-screen camera; for panel layouts, place the phone above its reserved area. The normal feed remains available simultaneously. Keep GO LIVE on; audio remains separate.");
+    });
+  };
+  addFeedButton("Copy Normal Output URL","normal",4);
+  auto *savedLayouts=new QComboBox;
+  auto *copySaved=new QPushButton("Copy Saved Layout URL");
+  savedLayouts->setToolTip("Each saved layout has its own independent OBS Browser source.");
+  settingsGrid->addWidget(savedLayouts,6,0,1,2);
+  settingsGrid->addWidget(copySaved,7,0,1,2);
+  auto refreshSaved=[this,obsFeed,savedLayouts,copySaved]{
+    const QString selected=savedLayouts->currentText();
+    savedLayouts->clear();
+    const auto saved=QJsonDocument::fromJson(QSettings().value("OBS/ScenePresets").toByteArray()).object();
+    for(const QString &name:saved.keys()){
+      savedLayouts->addItem(name);
+      obsFeed->setLayoutRenderer(name,[this,name]{
+        if(isPresenting){
+          const auto presets=QJsonDocument::fromJson(QSettings().value("OBS/ScenePresets").toByteArray()).object();
+          return projection->renderObsScene(ObsSceneLayout::fromJson(presets.value(name).toObject()));
+        }
+        const auto presets=QJsonDocument::fromJson(QSettings().value("OBS/ScenePresets").toByteArray()).object();
+        const bool alpha=ObsSceneLayout::fromJson(presets.value(name).toObject()).transparent;
+        QImage black(1920,1080,alpha?QImage::Format_ARGB32_Premultiplied:QImage::Format_RGB32);black.fill(alpha?QColor(Qt::transparent):QColor(Qt::black));return black;
+      });
+    }
+    const int previous=savedLayouts->findText(selected);
+    if(previous>=0)savedLayouts->setCurrentIndex(previous);
+    copySaved->setEnabled(savedLayouts->count()>0);
+    if(!savedLayouts->count())savedLayouts->setPlaceholderText("Save a layout in OBS Scene Layout first");
+  };
+  refreshSaved();
+  obsFeed->start(); // Restore existing OBS sources when the app reopens.
+  connect(copySaved,&QPushButton::clicked,this,[this,obsFeed,savedLayouts]{
+    if(!obsFeed->start()){QMessageBox::warning(this,"OBS feed","Cannot start the local feed. Close other app copies and try again.");return;}
+    QApplication::clipboard()->setText(obsFeed->url(LocalObsFeed::layoutEndpoint(savedLayouts->currentText())));
+    QMessageBox::information(this,"Saved layout URL copied","Add this URL as an OBS Browser source (1920 × 1080). Each saved layout has its own URL. Saving changes under the same name updates that feed. Keep GO LIVE on. For a transparent overlay, place this source above the full-screen camera. For panel layouts, place your phone above its reserved area.");
+  });
+  connect(sceneEditor,&QPushButton::clicked,this,[this,refreshSaved]{
+    ObsSceneEditor editor(projection,this);
+    if(editor.exec()==QDialog::Accepted){
+      projection->applyObsScene(editor.draft);
+      if(editor.draft.enabled) outputModeCombo->setCurrentIndex(1);
+      QSettings().setValue("OBS/SceneLayout",QJsonDocument(editor.draft.json()).toJson(QJsonDocument::Compact));
+    }
+    refreshSaved();
+  });
+  auto *captionControls=new QWidget;auto *captionRow=new QHBoxLayout(captionControls);captionRow->setContentsMargins(0,0,0,0);
+  auto *captionBack=new QPushButton("◀ Text"),*captionNext=new QPushButton("Text ▶");auto *captionStatus=new QLabel;
+  captionRow->addWidget(captionBack);captionRow->addWidget(captionStatus);captionRow->addWidget(captionNext);
+  settingsGrid->addWidget(captionControls,8,0,1,2);
+  auto selectedCaption=[this,savedLayouts]{
+    const auto saved=QJsonDocument::fromJson(QSettings().value("OBS/ScenePresets").toByteArray()).object();
+    return saved.contains(savedLayouts->currentText())?ObsSceneLayout::fromJson(saved.value(savedLayouts->currentText()).toObject()):projection->obsScene;
+  };
+  connect(captionBack,&QPushButton::clicked,this,[this,selectedCaption]{projection->advanceObsText(selectedCaption(),-1);});
+  connect(captionNext,&QPushButton::clicked,this,[this,selectedCaption]{projection->advanceObsText(selectedCaption(),1);});
+  auto *captionTimer=new QTimer(this);
+  connect(captionTimer,&QTimer::timeout,this,[=]{
+    const auto scene=selectedCaption();captionControls->setVisible(scene.transparent && scene.captionPaging);
+    if(!scene.transparent)return;
+    const int current=projection->obsTextPage(scene),count=projection->obsTextPages(scene).size();
+    captionStatus->setText(QString("Text %1 / %2").arg(current+1).arg(count));
+    captionBack->setEnabled(current>0);captionNext->setEnabled(current+1<count);
+  });captionTimer->start(200);
   settingsGrid->setColumnStretch(1, 1);
 
   cLayout->addLayout(settingsGrid);
@@ -1914,7 +2033,7 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   auto *stageX = new QSpinBox();stageX->setRange(0,90);stageX->setSuffix(" %");
   auto *stageY = new QSpinBox();stageY->setRange(0,95);stageY->setSuffix(" %");
   auto *stageWidth = new QSpinBox();stageWidth->setRange(10,100);stageWidth->setSuffix(" %");
-  auto *stageHeight = new QSpinBox();stageHeight->setRange(5,40);stageHeight->setSuffix(" %");
+  auto *stageHeight = new QSpinBox();stageHeight->setRange(3,40);stageHeight->setSuffix(" %");
   auto *stageForeground = new QPushButton("Text colour");
   auto *stageBackground = new QPushButton("Bar colour / opacity");
   auto colours = std::make_shared<QPair<QColor,QColor>>();
@@ -1929,9 +2048,16 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   stageX->setValue(savedStage.value("StageBar/x",0).toInt());
   stageY->setValue(savedStage.value("StageBar/y",90).toInt());
   stageWidth->setValue(savedStage.value("StageBar/width",100).toInt());
-  stageHeight->setValue(savedStage.value("StageBar/height",10).toInt());
+  stageHeight->setValue(savedStage.value("StageBar/height",8).toInt());
   if (stageMode->currentIndex()==2 && !savedStage.value("StageBar/compactNewsLayout",false).toBool())
-    stageHeight->setValue(12);
+    stageHeight->setValue(8);
+  if (stageMode->currentIndex()==2 && !savedStage.value("StageBar/compactBannerV2",false).toBool()) {
+    if(stageHeight->value()>=12)stageHeight->setValue(8);
+    savedStage.setValue("StageBar/height",stageHeight->value());
+    savedStage.setValue("StageBar/compactBannerV2",true);
+  }
+  stageHeight->setToolTip("Banner height as a percentage of the stage. Try 6–8% for a compact news banner.");
+  stageSize->setToolTip("Controls text size for the title, LIVE label, ticker and clock; text shrinks further when needed to fit.");
   colours->first=savedStage.value("StageBar/foreground",QColor(Qt::white)).value<QColor>();
   colours->second=savedStage.value("StageBar/background",QColor(15,23,42,230)).value<QColor>();
   auto *newsTitle = new QLineEdit(savedStage.value("StageBar/newsTitle", "SUNDAY SERVICE").toString());
@@ -1968,10 +2094,10 @@ void ControlWindow::setupMasterControl(QWidget *container) {
     bar.newsStyle=stageMode->currentIndex()==2;
     if (bar.newsStyle) {
       const QSignalBlocker heightBlock(stageHeight), yBlock(stageY), xBlock(stageX), widthBlock(stageWidth), screenBlock(stageScreen);
-      stageHeight->setRange(6,30);
+      stageHeight->setRange(3,30);
       stageY->setMaximum(100-stageHeight->value());stageY->setValue(100-stageHeight->value());
       stageX->setValue(0);stageWidth->setValue(100);stageScreen->setCurrentIndex(0);
-    } else { stageHeight->setRange(5,40);stageY->setMaximum(95); }
+    } else { stageHeight->setRange(3,40);stageY->setMaximum(95); }
     stageY->setEnabled(!bar.newsStyle);
     bar.title=newsTitle->text();bar.headline=newsHeadline->text();bar.label=newsLabel->text();bar.showClock=newsClock->isChecked();
     for (auto *field : {newsTitle,newsHeadline,newsLabel}) field->setEnabled(bar.newsStyle);
@@ -2001,7 +2127,7 @@ void ControlWindow::setupMasterControl(QWidget *container) {
   connect(newsLayout,&QPushButton::clicked,this,[=]() {
     const QSignalBlocker modeBlock(stageMode), screenBlock(stageScreen), xBlock(stageX), yBlock(stageY), widthBlock(stageWidth), heightBlock(stageHeight), enabledBlock(stageEnabled);
     stageMode->setCurrentIndex(2);stageScreen->setCurrentIndex(0);
-    stageX->setValue(0);stageY->setValue(88);stageWidth->setValue(100);stageHeight->setValue(12);
+    stageX->setValue(0);stageY->setValue(92);stageWidth->setValue(100);stageHeight->setValue(8);
     stageEnabled->setChecked(true);applyStage();
   });
   for (auto *field : {newsTitle,newsHeadline,newsLabel}) connect(field,&QLineEdit::textChanged,this,applyStage);
@@ -2157,7 +2283,8 @@ void ControlWindow::onBibleVerseSelected(QListWidgetItem *item) {
     fullText = text;
   }
   lastProjectedText = fullText;
-  projectBibleVerse(fullText);
+  const auto identity=item->data(Qt::UserRole+2).toMap();
+  projectBibleVerse(fullText,identity.value("book").toString(),identity.value("chapter").toInt(),identity.value("verse").toInt());
 }
 void ControlWindow::onQuickSearch() {
   QString query = bibleQuickSearch->text().trimmed();
@@ -2190,6 +2317,7 @@ void ControlWindow::onQuickSearch() {
                       .arg(v.verse)
                       .arg(v.version);
     item->setData(Qt::UserRole + 1, ref);
+      item->setData(Qt::UserRole+2,QVariantMap{{"book",v.book},{"chapter",v.chapter},{"verse",v.verse}});
 
     connect(widget, &VerseWidget::versionChanged,
             [item, v](const QString &newVer, const QString &newText) {
@@ -2422,40 +2550,11 @@ void ControlWindow::deleteSong() {
 // ... Projection Logic ...
 
 bool ControlWindow::chooseContentScreen() {
-  const auto type = static_cast<Projection::LayoutType>(projectionLayoutCombo->currentData().toInt());
-  if (type == Projection::LayoutType::Single) {
-    targetLayerCombo->setCurrentIndex(0);
-    currentTargetLayer = 0;
-    return true;
-  }
-  QMessageBox chooser(this);
-  // Use the themed Qt card rather than a native Windows message box.
-  // Prepare its background and layout before the native window is shown.
-  chooser.setOption(QMessageBox::Option::DontUseNativeDialog, true);
-  chooser.setAutoFillBackground(true);
-  QPalette chooserPalette = chooser.palette();
-  chooserPalette.setColor(QPalette::Window, QColor("#0f172a"));
-  chooserPalette.setColor(QPalette::WindowText, QColor("#e2e8f0"));
-  chooser.setPalette(chooserPalette);
-  chooser.setStyleSheet(
-      "QMessageBox { background-color: #0f172a; color: #e2e8f0; }"
-      "QLabel { color: #e2e8f0; background: transparent; }"
-      "QPushButton { background: #334155; color: #f8fafc; border: none;"
-      " border-radius: 6px; padding: 10px 20px; min-width: 80px; }"
-      "QPushButton:hover { background: #155e75; }"
-      "QPushButton:focus { border: 1px solid #38bdf8; }");
-  chooser.setWindowTitle("Choose projection screen");
-  chooser.setText("Where should this content appear?");
-  chooser.setInformativeText(type == Projection::LayoutType::SplitVertical ? "Screen 1: left · Screen 2: right" : "Screen 1: top · Screen 2: bottom");
-  auto *one = chooser.addButton("Screen 1", QMessageBox::AcceptRole);
-  auto *two = chooser.addButton("Screen 2", QMessageBox::AcceptRole);
-  chooser.addButton(QMessageBox::Cancel);
-  chooser.ensurePolished();
-  chooser.adjustSize();
-  chooser.exec();
-  if (chooser.clickedButton() != one && chooser.clickedButton() != two) return false;
-  currentTargetLayer = chooser.clickedButton() == one ? 0 : 1;
-  targetLayerCombo->setCurrentIndex(currentTargetLayer);
+  const auto type=static_cast<Projection::LayoutType>(projectionLayoutCombo->currentData().toInt());
+  // The existing Target selector is persistent. Re-prompting on every verse
+  // interrupts Bible/Notes projection and is unnecessary.
+  currentTargetLayer=type==Projection::LayoutType::Single?0:qBound(0,targetLayerCombo->currentData().toInt(),1);
+  if(type==Projection::LayoutType::Single)targetLayerCombo->setCurrentIndex(0);
   return true;
 }
 
@@ -2472,15 +2571,26 @@ void ControlWindow::projectVerse(int index) {
   if (preview) preview->setLayerText(currentTargetLayer, text);
 }
 
-void ControlWindow::projectBibleVerse(const QString &text) {
+void ControlWindow::projectBibleVerse(const QString &text,const QString &book,int chapter,int verse) {
   if (!chooseContentScreen()) return;
   lastProjectedText = text;
   m_screenText[currentTargetLayer] = text;
   if (projection) projection->setLayerText(currentTargetLayer, text);
   if (preview) preview->setLayerText(currentTargetLayer, text);
+  QList<BibleGeographyReference> references;
+  if(!book.isEmpty()){
+    const auto reference=geographyReference(book,chapter,verse);if(reference.book>=0)references.append(reference);
+  }else references=geographyReferences(text);
+  QStringList places,labels;
+  for(const auto &reference:references){
+    if(!labels.contains(reference.label))labels.append(reference.label);
+    for(const auto &id:BibleMap::instance().linkedPlaces(reference.book,reference.chapter,reference.verse,reference.endVerse))if(!places.contains(id))places.append(id);
+  }
+  projection->setMapReference(currentTargetLayer,places,labels.join("; "));
 }
 
 void ControlWindow::nextVerse() {
+  if(projection && projection->obsScene.enabled && projection->advanceObsText(projection->obsScene,1))return;
   // Decide if we are in Song or Bible mode?
   // Simply check active tab
   if (mainTabWidget->currentIndex() == 1) { // Songs
@@ -2499,16 +2609,19 @@ void ControlWindow::nextVerse() {
 }
 
 void ControlWindow::prevVerse() {
+  if(projection && projection->obsScene.enabled && projection->advanceObsText(projection->obsScene,-1))return;
   if (mainTabWidget->currentIndex() == 1) { // Songs
     if (currentVerseIndex > 0) {
       verseList->setCurrentRow(currentVerseIndex - 1);
       projectVerse(verseList->currentRow());
+      if(projection && projection->obsScene.enabled && projection->obsScene.transparent)projection->lastObsTextPage(projection->obsScene);
     }
   } else if (mainTabWidget->currentIndex() == 0) { // Bible
     int row = bibleVerseList->currentRow();
     if (row > 0) {
       bibleVerseList->setCurrentRow(row - 1);
       onBibleVerseSelected(bibleVerseList->currentItem());
+      if(projection && projection->obsScene.enabled && projection->obsScene.transparent)projection->lastObsTextPage(projection->obsScene);
     }
   }
 }
@@ -3553,7 +3666,7 @@ void ControlWindow::setupBrowserTab(QWidget *container) {
                                          .arg(chapter)
                                          .arg(verseNum)
                                          .arg(ver);
-                  projectBibleVerse(fullText);
+                  projectBibleVerse(fullText,book,chapter,verseNum);
                   m_browserStatus->setText(
                       "📖 Projected: " + book + " " + QString::number(chapter) +
                       ":" + QString::number(verseNum) + " (" + ver + ")");
@@ -4456,4 +4569,66 @@ void ControlWindow::showImportLyricsDialog(const QString &title,
   });
 
   dlg.exec();
+}
+
+void ControlWindow::setupMapsTab(QWidget *container){
+  auto *layout=new QVBoxLayout(container);
+  auto *intro=new QLabel("Manual map explorer · Bible and Notes follow scripture locations automatically. Here you can search other places or enter coordinates. Drag to pan; scroll to zoom.");intro->setWordWrap(true);layout->addWidget(intro);
+  auto *modes=new QComboBox;modes->addItems({"Verse only (without map)","Map + verse","Map only"});layout->addWidget(modes);
+  auto *source=new QComboBox;source->addItems({"Verse from Screen 1","Verse from Screen 2"});layout->addWidget(source);
+  auto *search=new QLineEdit;search->setPlaceholderText("Find a biblical or modern place, e.g. Jerusalem, Capernaum…");layout->addWidget(search);
+  auto *row=new QHBoxLayout;layout->addLayout(row,1);
+  auto *places=new QListWidget;places->setMaximumWidth(240);row->addWidget(places);
+  auto *map=new BibleMapPreview;row->addWidget(map,1);
+  auto *info=new QLabel;info->setWordWrap(true);layout->addWidget(info);
+  auto *coordinates=new QHBoxLayout;layout->addLayout(coordinates);
+  auto makeCoordinate=[&](const QString &label,double lo,double hi,double value){coordinates->addWidget(new QLabel(label));auto *spin=new QDoubleSpinBox;spin->setRange(lo,hi);spin->setDecimals(5);spin->setSingleStep(0.1);spin->setValue(value);coordinates->addWidget(spin);return spin;};
+  auto *lon=makeCoordinate("Longitude",-180,180,35.23),*lat=makeCoordinate("Latitude",-75,75,31.78);
+  auto *span=new QDoubleSpinBox;span->setRange(0.05,180);span->setDecimals(2);span->setValue(9);span->setSuffix("° span");coordinates->addWidget(span);
+  auto *zoomIn=new QPushButton("+"),*zoomOut=new QPushButton("−"),*reset=new QPushButton("Overview");coordinates->addWidget(zoomIn);coordinates->addWidget(zoomOut);coordinates->addWidget(reset);
+  auto selected=std::make_shared<QString>();auto title=std::make_shared<QString>("Bible lands");
+  auto refresh=[=]{
+    projection->setMapView(lon->value(),lat->value(),span->value(),*selected,*title);
+    map->frame=BibleMap::instance().render(QSize(960,600),lon->value(),lat->value(),span->value(),*selected);map->update();
+  };
+  auto filter=[=]{
+    places->clear();const auto query=search->text().trimmed();
+    QList<BibleMap::Place> matches;
+    for(const auto &place:BibleMap::instance().places)if(query.isEmpty() || place.name.contains(query,Qt::CaseInsensitive) || place.modern.contains(query,Qt::CaseInsensitive))matches.append(place);
+    std::sort(matches.begin(),matches.end(),[](const auto &a,const auto &b){return a.name.localeAwareCompare(b.name)<0;});
+    for(const auto &place:matches){auto *item=new QListWidgetItem(place.name,places);item->setData(Qt::UserRole,place.id);item->setToolTip(QString("%1 · %2\n%3, %4").arg(place.modern,place.type).arg(place.lat,0,'f',5).arg(place.lon,0,'f',5));}
+  };
+  connect(search,&QLineEdit::textChanged,this,[=]{filter();});
+  connect(places,&QListWidget::currentItemChanged,this,[=](QListWidgetItem *item){
+    if(!item)return;for(const auto &place:BibleMap::instance().places)if(place.id==item->data(Qt::UserRole).toString()){
+      *selected=place.id;*title=place.name;{QSignalBlocker a(lon),b(lat),c(span);lon->setValue(place.lon);lat->setValue(qBound(-75.0,place.lat,75.0));span->setValue(3);}
+      info->setText(QString("%1 · %2 · %3\nLatitude %4°, longitude %5°. Best-supported location; identification may be uncertain.").arg(place.name,place.modern,place.type).arg(place.lat,0,'f',5).arg(place.lon,0,'f',5));refresh();break;
+    }
+  });
+  for(auto *spin:{lon,lat,span})connect(spin,&QDoubleSpinBox::valueChanged,this,[=]{refresh();});
+  map->zoom=[=](double factor){span->setValue(span->value()*factor);};
+  map->pan=[=](double x,double y){QSignalBlocker a(lon),b(lat);lon->setValue(lon->value()-x*span->value());lat->setValue(qBound(-75.0,BibleMap::latitude(BibleMap::mercator(lat->value())+y*span->value()),75.0));refresh();};
+  connect(zoomIn,&QPushButton::clicked,this,[=]{map->zoom(0.8);});connect(zoomOut,&QPushButton::clicked,this,[=]{map->zoom(1.25);});
+  connect(reset,&QPushButton::clicked,this,[=]{*selected={};*title="Bible lands";QSignalBlocker a(lon),b(lat),c(span);lon->setValue(35.23);lat->setValue(31.78);span->setValue(24);refresh();});
+  auto apply=[=]{projection->setMapMode(modes->currentIndex(),source->currentIndex(),false);};
+  connect(modes,&QComboBox::currentIndexChanged,this,[=]{apply();});connect(source,&QComboBox::currentIndexChanged,this,[=]{apply();});
+  auto *links=new QHBoxLayout;layout->addLayout(links);
+  for(const auto &entry:QList<QPair<QString,QString>>{{"Copy Verse URL","maps/verse-only"},{"Copy Map + Verse URL","maps/map-and-verse"},{"Copy Map URL","maps/map-only"}}){
+    auto *button=new QPushButton(entry.first);links->addWidget(button);connect(button,&QPushButton::clicked,this,[this,path=entry.second]{
+      if(!mapObsFeed || !mapObsFeed->start()){QMessageBox::warning(this,"Map feed","Cannot start the local OBS feed.");return;}
+      QApplication::clipboard()->setText(mapObsFeed->url(path));QMessageBox::information(this,"Map URL copied","Add this URL as an OBS Browser source, 1920 × 1080. Keep GO LIVE on. All three feeds remain available independently of the direct projection mode.");
+    });
+  }
+  auto *credits=new QPushButton("Map data sources and licences");layout->addWidget(credits);
+  connect(credits,&QPushButton::clicked,this,[this]{QMessageBox::information(this,"Offline geography sources","Bible place coordinates: OpenBible.info Bible Geocoding Data, CC BY 4.0.\nhttps://github.com/openbibleinfo/Bible-Geocoding-Data\n\nLand, rivers and lakes: Natural Earth, public domain.\nhttps://www.naturalearthdata.com/\n\nBundled from BiAY; source revisions and transformations are included in geography/manifest.json and physical_sources.json. Geographic features provide modern context; ancient identifications may be uncertain.");});
+  filter();refresh();
+}
+
+QWidget *ControlWindow::createScriptureMapControls(){
+  auto *panel=new QWidget;panel->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Fixed);panel->setFixedHeight(38);
+  auto *row=new QHBoxLayout(panel);row->setContentsMargins(0,2,0,2);row->setSpacing(6);
+  auto *selector=new ScriptureViewSelector;row->addWidget(selector);row->addStretch();
+  selector->changed=[this](int mode){projection->setMapMode(mode,currentTargetLayer);QSettings().setValue("Projection/ScriptureMapMode",mode);};
+  auto refresh=[this,selector]{selector->setMode(projection->mapMode());};
+  auto *timer=new QTimer(panel);connect(timer,&QTimer::timeout,panel,refresh);timer->start(200);refresh();return panel;
 }
