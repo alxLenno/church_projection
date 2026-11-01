@@ -71,7 +71,9 @@ public:
   void setLayoutRenderer(const QString &name,std::function<QImage()> value) {
     setRenderer(layoutEndpoint(name),value);
     const auto legacy=legacyLayoutEndpoint(name);
-    if(!streams.contains(legacy))setRenderer(legacy,std::move(value));
+    // Both URLs identify one output. Share the encoded frame as well as
+    // the renderer, avoiding duplicate work for old and new OBS sources.
+    streams.insert(legacy,streams.value(layoutEndpoint(name)));
   }
   void setRenderer(const QString &key,std::function<QImage()> value) {
     auto stream=std::make_shared<Stream>();stream->render=std::move(value);streams.insert(key,stream);

@@ -301,6 +301,7 @@ ProjectionWindow::ProjectionWindow(QWidget *parent) : QWidget(parent) {
 
   // Start Animation Loop
   renderTimer = new QTimer(this);
+  renderTimer->setObjectName("projectionAnimationTimer");
   connect(renderTimer, &QTimer::timeout, this, [this]() {
     // Only update if scrolling is active
     bool needsUpdate = stageOverlay.enabled && (stageOverlay.newsStyle || (stageOverlay.scrolling && !stageOverlay.text.isEmpty()));
@@ -312,10 +313,12 @@ ProjectionWindow::ProjectionWindow(QWidget *parent) : QWidget(parent) {
         len->scrollOffset = 0;
       }
     }
+    // Static output needs no 60 Hz wakeups; OBS has its own pull feed.
+    renderTimer->setInterval(needsUpdate ? 16 : 1000);
     if (needsUpdate)
       update();
   });
-  renderTimer->start(16); // ~60 FPS
+  renderTimer->start(1000); // ~60 FPS
 }
 
 void ProjectionWindow::setupLayer(int idx) {
@@ -351,6 +354,7 @@ void ProjectionWindow::setupLayer(int idx) {
 }
 
 void ProjectionWindow::setLayerText(int layerIdx, const QString &text) {
+  renderTimer->start(16);
   if (liveBrowser && browserLayer == layerIdx) releaseBrowser();
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
@@ -371,6 +375,7 @@ void ProjectionWindow::setLayerText(int layerIdx, const QString &text) {
 
 void ProjectionWindow::setLayerFormatting(
     int layerIdx, const Projection::TextFormatting &fmt) {
+  renderTimer->start(16);
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   layers[layerIdx]->content.formatting = fmt;

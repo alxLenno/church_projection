@@ -15,6 +15,7 @@ ProjectionPreview::ProjectionPreview(QWidget *parent) : QWidget(parent) {
 
   // Timer for preview animation — only updates when scrolling
   renderTimer = new QTimer(this);
+  renderTimer->setObjectName("projectionAnimationTimer");
   connect(renderTimer, &QTimer::timeout, this, [this]() {
     bool needsUpdate = stageOverlay.enabled && (stageOverlay.newsStyle || (stageOverlay.scrolling && !stageOverlay.text.isEmpty()));
     for (auto len : layers) {
@@ -25,10 +26,12 @@ ProjectionPreview::ProjectionPreview(QWidget *parent) : QWidget(parent) {
         len->scrollOffset = 0;
       }
     }
+    // Static output needs no 60 Hz wakeups; OBS has its own pull feed.
+    renderTimer->setInterval(needsUpdate ? 16 : 1000);
     if (needsUpdate)
       update();
   });
-  renderTimer->start(16);
+  renderTimer->start(1000);
 }
 
 void ProjectionPreview::setupLayer(int idx) {
@@ -63,6 +66,7 @@ void ProjectionPreview::setupLayer(int idx) {
 }
 
 void ProjectionPreview::setLayerText(int layerIdx, const QString &text) {
+  renderTimer->start(16);
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   if (!text.isEmpty()) {
@@ -122,7 +126,6 @@ void ProjectionPreview::clearLayer(int layerIdx) {
 
   ls->mediaPlayer->stop();
   ls->isVideoActive = false;
-  ls->isVideoActive = false;
   ls->content = Content();
 
   // Ensure media is cleared
@@ -161,6 +164,7 @@ void ProjectionPreview::setLayerMedia(int layerIdx,
 
 void ProjectionPreview::setLayerFormatting(
     int layerIdx, const Projection::TextFormatting &fmt) {
+  renderTimer->start(16);
   if (layerIdx < 0 || layerIdx >= (int)layers.size())
     return;
   layers[layerIdx]->content.formatting = fmt;

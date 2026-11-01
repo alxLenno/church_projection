@@ -194,9 +194,11 @@ public:
 protected:
   void enterEvent(QEnterEvent *event) override {
     QWidget::enterEvent(event);
+#ifndef Q_OS_MACOS
     if (m_theme.type == ThemeType::Video && !m_player) {
       startVideo();
     }
+#endif
   }
 
   void leaveEvent(QEvent *event) override {
@@ -249,13 +251,8 @@ private:
     m_audio->setMuted(true);
     m_player->setAudioOutput(m_audio);
     m_player->setVideoOutput(m_videoWidget);
+    m_player->setLoops(QMediaPlayer::Infinite);
     m_player->setSource(QUrl::fromLocalFile(m_theme.contentPath));
-
-    connect(m_player, &QMediaPlayer::playbackStateChanged,
-            this, [this](QMediaPlayer::PlaybackState state) {
-              if (state == QMediaPlayer::StoppedState && m_player)
-                m_player->play();
-            });
 
     m_player->play();
   }
@@ -311,6 +308,14 @@ private:
     m_thumbnailPath = cacheDir + "/" + QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex() + ".png";
     QPixmap cached(m_thumbnailPath);
     if (!cached.isNull()) { m_thumbLabel->setPixmap(cached); return; }
+#ifdef Q_OS_MACOS
+    // Keep the idle theme browser decoder-free. Short-lived AVFoundation
+    // thumbnail players can leave asynchronous CoreMedia timer callbacks
+    // during teardown. Use a still image/cache when available instead.
+    m_thumbLabel->setText("Video theme");
+    m_thumbLabel->setToolTip("Apply this theme to play its video");
+    return;
+#endif
     s_captureQueue.append(this);
     processQueue();
   }
@@ -1611,7 +1616,7 @@ void ControlWindow::setupMasterControl(QWidget *container) {
     const bool obs=outputModeCombo && outputModeCombo->currentData().toBool();
     previewGroup->setTitle(maps?"MAP OUTPUT PREVIEW":obs?"OBS OUTPUT PREVIEW":"PROJECTOR PREVIEW");
     previewStack->setCurrentIndex(maps || obs?1:0);
-    if(previewStack->currentWidget()!=obsPreview)return;
+    if(previewStack->currentWidget()!=obsPreview || !obsPreview->isVisible() || isMinimized())return;
     obsPreview->refresh();
   };
   auto *obsPreviewTimer=new QTimer(this);connect(obsPreviewTimer,&QTimer::timeout,this,refreshObs);obsPreviewTimer->start(200);
@@ -3031,6 +3036,7 @@ void ControlWindow::setupMediaTab(QWidget *container) {
   connect(videoVolume, &QSlider::valueChanged, this, [applyVideoAudio](int) { applyVideoAudio(); });
   auto *audioSync = new QTimer(container);
   connect(audioSync, &QTimer::timeout, this, [this, muteVideo, videoVolume]() {
+    if (!muteVideo->isVisible() || isMinimized()) return;
     const QSignalBlocker muteBlock(muteVideo), volumeBlock(videoVolume);
     muteVideo->setChecked(projection->layerVideoMuted(currentTargetLayer));
     videoVolume->setValue(qRound(projection->layerVideoVolume(currentTargetLayer) * 100));

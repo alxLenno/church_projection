@@ -29,6 +29,20 @@ int main(int argc, char **argv) {
     if (bounds.height() > area.height() || bounds.width() > area.width()) qFatal("Wrapped verse overflows available space");
   }
   ProjectionWindow window;
+  auto *animationTimer=window.findChild<QTimer*>("projectionAnimationTimer");
+  if(!animationTimer || animationTimer->interval()!=1000)qFatal("Idle projection is waking at animation frequency");
+  {
+    Projection::TextFormatting scrolling;
+    scrolling.isScrolling=true;
+    window.setLayerText(0,"Scrolling stays active for covered OBS output");
+    window.setLayerFormatting(0,scrolling);
+    if(animationTimer->interval()!=16)qFatal("Scrolling failed to wake the animation timer");
+    QEventLoop loop;QTimer::singleShot(40,&loop,&QEventLoop::quit);loop.exec();
+    if(animationTimer->interval()!=16)qFatal("Hidden OBS scrolling was throttled");
+    scrolling.isScrolling=false;window.setLayerFormatting(0,scrolling);
+    QEventLoop idle;QTimer::singleShot(40,&idle,&QEventLoop::quit);idle.exec();
+    if(animationTimer->interval()!=1000)qFatal("Static projection failed to return to idle frequency");
+  }
   window.showOutput(true, app.primaryScreen());
   app.processEvents();
   if (window.isFullScreen() || !window.isVisible() || !window.windowFlags().testFlag(Qt::FramelessWindowHint)) qFatal("OBS output not a borderless window");
@@ -91,6 +105,15 @@ int main(int argc, char **argv) {
   const auto beforeA=get(endpointA+"/frame"),beforeB=get(endpointB+"/frame");
   if(endpointB!="layout/Scripture" || endpointA!="layout/Worship%20%2F%20ibada")qFatal("Layout URLs do not preserve encoded names");
   if(get(LocalObsFeed::legacyLayoutEndpoint("Scripture")+"/frame")!=beforeB)qFatal("Existing hashed layout URL stopped working");
+  {
+    int renders=0;
+    feed.setLayoutRenderer("Cache check",[&]{++renders;QImage image(16,16,QImage::Format_RGB32);image.fill(Qt::black);return image;});
+    get(LocalObsFeed::layoutEndpoint("Cache check")+"/frame");
+    get(LocalObsFeed::legacyLayoutEndpoint("Cache check")+"/frame");
+    if(renders!=1)qFatal("Legacy layout URL duplicated frame rendering");
+    feed.setLayoutRenderer("Cache check",[]{QImage image(16,16,QImage::Format_RGB32);image.fill(Qt::red);return image;});
+    if(get(LocalObsFeed::layoutEndpoint("Cache check")+"/frame")!=get(LocalObsFeed::legacyLayoutEndpoint("Cache check")+"/frame"))qFatal("Replaced saved renderer left a stale legacy URL");
+  }
   if(beforeA==beforeB)qFatal("Saved layouts share frames");
   savedA.background=QColor("#117511");
   {QEventLoop loop;QTimer::singleShot(70,&loop,&QEventLoop::quit);loop.exec();}

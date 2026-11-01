@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -34,7 +35,7 @@ public:
 
   void saveSongs() {
     QString path = getStoragePath();
-    QFile file(path);
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
       qWarning() << "Failed to save songs to:" << path << file.errorString();
       return;
@@ -56,7 +57,9 @@ public:
     }
 
     QJsonDocument doc(array);
-    file.write(doc.toJson());
+    const QByteArray data = doc.toJson();
+    if (file.write(data) != data.size() || !file.commit())
+      qWarning() << "Failed to commit songs to:" << path << file.errorString();
   }
 
   void loadSongs() {

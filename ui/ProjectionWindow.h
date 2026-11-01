@@ -27,7 +27,7 @@ class ProjectionWindow : public QWidget {
 public:
   void setStageOverlay(const Projection::StageOverlay &value) {
     if (!overlayClock.isValid() || value.text != stageOverlay.text || value.scrolling != stageOverlay.scrolling) overlayClock.restart();
-    stageOverlay = value; update();
+    stageOverlay = value; renderTimer->start(16); update();
   }
   void setBlackout(bool hidden) { blackout = hidden; update(); }
   void setTextVisible(bool visible) { textVisible = visible; update(); }
